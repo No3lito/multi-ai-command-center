@@ -28,9 +28,9 @@ Next.js + TypeScript + Tailwind · Python + FastAPI · PostgreSQL + pgvector · 
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| 1 | Technical discovery and architecture | Done, awaiting approval |
-| 2 | Minimum viable chatroom: two providers, persistence, coordinator, approval gate | Not started |
-| 3 | Agent roles, tasks, handoffs, more providers | Not started |
+| 1 | Technical discovery and architecture | Done; Revision 1 under review ([#1](https://github.com/No3lito/multi-ai-command-center/issues/1)) |
+| 2 | Minimum viable chatroom: two providers, minimal MCP gateway, concurrency, security controls, approval gate | Not started |
+| 3 | Agent roles, tasks, handoffs, more providers, orchestration engine evaluation | Not started |
 | 4 | Workflow engine, sandbox, code review loops, audit | Not started |
 | 5 | Customization, memory, MCP gateway, A2A | Not started |
 | 6 | Production hardening | Not started |
