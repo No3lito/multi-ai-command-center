@@ -37,12 +37,22 @@ def main() -> None:
             WEB_DIST=str(web_dist),
             WS_HEARTBEAT_SECONDS="2",
         )
-        subprocess.run([sys.executable, "-m", "command_center.cli", "migrate"], cwd=BACKEND, env=env,
-                       check=True)
+        subprocess.run(
+            [sys.executable, "-m", "command_center.cli", "migrate"], cwd=BACKEND, env=env, check=True
+        )
         proc = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "command_center.main:app", "--host", "127.0.0.1",
-             "--port", str(args.port)],
-            cwd=BACKEND, env=env,
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "command_center.main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(args.port),
+            ],
+            cwd=BACKEND,
+            env=env,
         )
 
         def stop(*_: object) -> None:
