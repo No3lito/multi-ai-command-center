@@ -132,7 +132,7 @@ class MessageCreateIn(Strict):
 
 # ---------------------------------------------------------------- Milestone B
 
-ProviderName = Literal["anthropic", "openai", "simulated"]
+ProviderName = Literal["anthropic", "openai", "xai", "simulated"]
 AgentStatus = Literal["live", "simulated", "missing_key", "unknown_price", "disabled"]
 RunStatus = Literal["queued", "running", "completed", "failed", "cancelled", "budget_exceeded"]
 MODEL_NAME = r"^[A-Za-z0-9._:-]{1,100}$"

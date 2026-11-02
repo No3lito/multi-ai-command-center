@@ -36,6 +36,10 @@ CLAUDE_PROMPT = (
     "You lead planning. Turn goals into clear, ordered, testable steps, and say what you would "
     "verify. When reviewing others, be specific and kind."
 )
+GROK_PROMPT = (
+    "You are the independent second opinion. Challenge assumptions, look for what the others "
+    "missed, and say plainly when you disagree. When asked to plan, keep it short and concrete."
+)
 GPT_PROMPT = (
     "You lead review. Find gaps, risks and simpler alternatives, and suggest concrete fixes. "
     "When asked to plan, keep plans short and practical."
@@ -43,7 +47,10 @@ GPT_PROMPT = (
 
 
 async def seed(db: Database, settings: Settings) -> str:
-    """Create the Coordinator and, on first start, the Claude and GPT agents. Returns the coordinator id."""
+    """Create the Coordinator and the default agents (Claude and GPT on first start, Grok once).
+
+    Returns the coordinator id.
+    """
     async with db.sessionmaker() as s:
         coordinator = await s.scalar(
             select(models.Principal).where(
@@ -54,29 +61,40 @@ async def seed(db: Database, settings: Settings) -> str:
             coordinator = models.Principal(id=new_id("sys"), kind="system", display_name="Coordinator")
             s.add(coordinator)
             await s.flush()
+        general = await s.scalar(select(models.Room).where(models.Room.name == "General"))
         has_agents = await s.scalar(select(models.AgentProfile.principal_id).limit(1))
+        defaults: list[tuple[str, str, str, str, str]] = []
         if has_agents is None:
-            general = await s.scalar(select(models.Room).where(models.Room.name == "General"))
-            for name, role, provider, model, prompt in (
+            defaults += [
                 ("Claude", "Planner", "anthropic", settings.default_claude_model, CLAUDE_PROMPT),
                 ("GPT", "Reviewer", "openai", settings.default_openai_model, GPT_PROMPT),
-            ):
-                agent = models.Principal(id=new_id("agt"), kind="agent", display_name=name)
-                s.add(agent)
-                await s.flush()
-                s.add(
-                    models.AgentProfile(
-                        principal_id=agent.id,
-                        role=role,
-                        provider=provider,
-                        model=model,
-                        system_prompt=prompt,
-                        max_output_tokens=2048,
-                        enabled=True,
-                    )
+            ]
+        # Grok arrived after the first agents, so existing installs get it once, too.
+        has_grok = await s.scalar(
+            select(models.AgentProfile.principal_id).where(models.AgentProfile.provider == "xai").limit(1)
+        )
+        grok_name_taken = await s.scalar(
+            select(models.Principal.id).where(func.lower(models.Principal.display_name) == "grok").limit(1)
+        )
+        if has_grok is None and grok_name_taken is None:
+            defaults.append(("Grok", "Challenger", "xai", settings.default_grok_model, GROK_PROMPT))
+        for name, role, provider, model, prompt in defaults:
+            agent = models.Principal(id=new_id("agt"), kind="agent", display_name=name)
+            s.add(agent)
+            await s.flush()
+            s.add(
+                models.AgentProfile(
+                    principal_id=agent.id,
+                    role=role,
+                    provider=provider,
+                    model=model,
+                    system_prompt=prompt,
+                    max_output_tokens=2048,
+                    enabled=True,
                 )
-                if general is not None:
-                    s.add(models.RoomMember(room_id=general.id, principal_id=agent.id))
+            )
+            if general is not None:
+                s.add(models.RoomMember(room_id=general.id, principal_id=agent.id))
         await s.commit()
         return coordinator.id
 

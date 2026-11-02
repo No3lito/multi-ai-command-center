@@ -1,6 +1,7 @@
 """`command-center live-check`: one tiny REAL request per provider, through the spending cap.
 
-Uses the cheapest models (claude-haiku-5-5, gpt-6-luna) with a 16-token output limit, so each
+Uses the cheapest models (claude-haiku-5-5, gpt-6-luna, grok-4.20-0309-non-reasoning) with a
+16-token output limit, so each
 call costs a small fraction of a cent. Every call goes through ModelPort, which reserves the
 worst-case cost against LIVE_BUDGET_USD before sending anything.
 """
@@ -19,7 +20,11 @@ from command_center.db.session import Database
 from command_center.providers.base import ChatMessage, ChatRequest, ProviderError
 from command_center.providers.model_port import LIVE_SCOPE, BudgetExceeded, ModelPort, ProviderNotReady
 
-CHECKS = (("anthropic", "claude-haiku-5-5", "Claude"), ("openai", "gpt-6-luna", "GPT"))
+CHECKS = (
+    ("anthropic", "claude-haiku-5-5", "Claude"),
+    ("openai", "gpt-6-luna", "GPT"),
+    ("xai", "grok-4.20-0309-non-reasoning", "Grok"),
+)
 
 
 async def run() -> int:
@@ -31,8 +36,13 @@ async def run() -> int:
     port = ModelPort(settings, db.sessionmaker)
     await port.ensure_cap()
     failures = 0
+    checked = 0
     try:
         for provider, model, agent_name in CHECKS:
+            if settings.api_key_for(provider) is None:
+                print(f"[{provider}] skipped: no {provider.upper()}_API_KEY in .env")
+                continue
+            checked += 1
             async with db.sessionmaker() as s:
                 agent = await s.scalar(
                     select(models.Principal).where(
@@ -85,6 +95,9 @@ async def run() -> int:
             )
     finally:
         await db.dispose()
+    if checked == 0:
+        print("No provider keys configured; nothing was checked.")
+        return 2
     return 1 if failures else 0
 
 

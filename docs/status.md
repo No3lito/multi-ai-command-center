@@ -2,9 +2,11 @@
 
 Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
 
-## Milestone B: live AI collaboration (in review)
+## Grok agent (in review)
 
-Branch: `agent/claude/milestone-b`, draft PR #4. Not merged until the owner approves. Contract: [`docs/api/milestone-b.md`](api/milestone-b.md).
+Branch: `agent/claude/grok-agent`. Adds Grok (xAI) as a third agent, seeded once on existing installs, behind the same spending cap. Evidence so far: mocked adapter tests and a fake-provider collaboration with Grok as critic (`backend/tests/test_grok.py`). **Real xAI API: pending the owner's `XAI_API_KEY`.**
+
+## Milestone B: live AI collaboration (accepted, merged in PR #4) Contract: [`docs/api/milestone-b.md`](api/milestone-b.md).
 
 ### Evidence labels
 

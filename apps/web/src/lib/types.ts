@@ -93,7 +93,7 @@ export const MESSAGE_TEXT_MAX = 32000;
  * Milestone B (docs/api/milestone-b.md): agents, runs and usage.
  * ------------------------------------------------------------------------- */
 
-export type AgentProvider = "anthropic" | "openai" | "simulated";
+export type AgentProvider = "anthropic" | "openai" | "xai" | "simulated";
 
 /** Whether an agent can run right now. */
 export type AgentStatus = "live" | "simulated" | "missing_key" | "unknown_price" | "disabled";

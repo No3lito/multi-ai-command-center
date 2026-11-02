@@ -135,7 +135,7 @@ class AgentProfile(Base):
     )
 
     __table_args__ = (
-        CheckConstraint("provider in ('anthropic','openai','simulated')", name="agent_provider"),
+        CheckConstraint("provider in ('anthropic','openai','xai','simulated')", name="agent_provider"),
         CheckConstraint("max_output_tokens between 16 and 8192", name="agent_max_output_tokens"),
     )
 

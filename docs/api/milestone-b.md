@@ -4,13 +4,13 @@ Extends [Milestone A](milestone-a.md); everything there still applies (auth, CSR
 
 ## Concepts
 
-- **Agent:** a principal of kind `agent` with a profile: role, provider, model, system prompt, output limit. Two agents are seeded on first start: **Claude** (Anthropic) and **GPT** (OpenAI), both members of `General`.
+- **Agent:** a principal of kind `agent` with a profile: role, provider, model, system prompt, output limit. Agents seeded by default, all members of `General`: **Claude** (Anthropic) and **GPT** (OpenAI) on first start, and **Grok** (xAI, `grok-4.20-0309-non-reasoning`) once, including on installs that existed before Grok was added.
 - **Coordinator:** a principal of kind `system` named `Coordinator`. It posts `task.assign`, `task.status` and `task.result` messages that narrate runs.
 - **Run:** one unit of coordinated work in a room. Two kinds:
   - `reply`: a single agent turn, created automatically when a chat message mentions an agent.
   - `collab`: the plan, critique, revise, summarize workflow between two agents.
 - **Provider mode** (`PROVIDER_MODE` setting):
-  - `live` (default): agents call the real Anthropic or OpenAI API. A missing key makes the turn fail with a clear error message in the room. There is never a silent fallback.
+  - `live` (default): agents call the real Anthropic, OpenAI or xAI API. A missing key makes the turn fail with a clear error message in the room. There is never a silent fallback.
   - `simulated`: every agent uses a deterministic local stand-in that costs nothing. Every simulated message carries `body.data.simulated = true` and the dashboard labels it **SIMULATED**.
 - **Run tree:** every run belongs to a tree started by one human action. A `collab` run is the root of its own tree. The runs created by one human message share one tree; the first is the root. Runs that agent @mentions create join their parent's tree. `root_run_id` names the root.
 - **Spending cap:** a persistent instance-wide cap on live spend (`LIVE_BUDGET_USD`, default `10.00`). Before every paid request the worst-case cost is reserved atomically: input tokens are estimated as one per UTF-8 byte of prompt (an upper bound for any language) plus the full output limit. The request is not sent if the reservation would exceed:
@@ -41,7 +41,7 @@ Agent and coordinator messages use the existing envelope:
 | PATCH | `/api/agents/{agent_id}` | partial `AgentIn` | `200 Agent` |
 | POST | `/api/rooms/{room_id}/members` | `{"principal_id": "agt_..."}` | `200 RoomDetail` (agents only; idempotent) |
 
-`AgentIn`: `{"display_name": "Claude", "role": "Planner", "provider": "anthropic" | "openai" | "simulated", "model": "claude-sonnet-5-5", "system_prompt": "...", "max_output_tokens": 1024, "enabled": true}`
+`AgentIn`: `{"display_name": "Claude", "role": "Planner", "provider": "anthropic" | "openai" | "xai" | "simulated", "model": "claude-sonnet-5-5", "system_prompt": "...", "max_output_tokens": 2048, "enabled": true}`
 
 `Agent`: `AgentIn` plus `{"id": "agt_...", "kind": "agent", "status": "live" | "simulated" | "missing_key" | "unknown_price" | "disabled", "price": {"input_per_mtok": 2.0, "output_per_mtok": 10.0} | null}`
 
@@ -117,3 +117,13 @@ Simulated calls are counted separately and never touch the cap.
 ## Real-time
 
 No new socket. Agent and coordinator messages arrive on the room stream like any other message. The dashboard refreshes run status by fetching `GET /api/runs/{id}` (or the room's run list) whenever a message with that `correlation_id` arrives.
+
+## xAI (Grok) notes
+
+Checked Nov 2, 2026 against [docs.x.ai](https://docs.x.ai/docs/guides/chat) and [xAI models and pricing](https://docs.x.ai/developers/models):
+
+- Grok is called through xAI's Responses API at `https://api.x.ai/v1` with the official OpenAI SDK, which xAI documents as its preferred API. `store=false` is sent, as for OpenAI.
+- xAI does not document `instructions`, so the system prompt is sent as a `system` message.
+- xAI lists reasoning tokens as a separately billed token type without saying whether `output_tokens` includes them. The app adds `reasoning_tokens` to output tokens, which can only over-count. Compare with the xAI console after real use.
+- The default model is non-reasoning, so its cost is bounded by `max_output_tokens`. A reasoning model such as `grok-4.7` may produce reasoning beyond that limit; any overrun is recorded truthfully and blocks further calls once the cap is reached.
+- From 200k prompt tokens, xAI's higher rate applies to all tokens of the request; the price table models this.

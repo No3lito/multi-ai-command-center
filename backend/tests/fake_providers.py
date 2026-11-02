@@ -20,7 +20,15 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-STATE: dict[str, object] = {"anthropic": 0, "openai": 0, "delay": 0.0, "models": [], "suffix": ""}
+STATE: dict[str, object] = {
+    "anthropic": 0,
+    "openai": 0,
+    "xai": 0,
+    "requests": [],
+    "delay": 0.0,
+    "models": [],
+    "suffix": "",
+}
 FAKE_IN, FAKE_OUT = 100, 50  # fixed token usage per call, so expected cost is exact
 
 
@@ -53,14 +61,28 @@ async def anthropic_messages(request: Request) -> JSONResponse:
     )
 
 
+FAKE_REASONING = 20  # xAI only: reported separately, as in xAI's documented usage examples
+
+
 async def openai_responses(request: Request) -> JSONResponse:
+    return await _responses(request, "openai", "OpenAI")
+
+
+async def xai_responses(request: Request) -> JSONResponse:
+    return await _responses(request, "xai", "xAI")
+
+
+async def _responses(request: Request, provider: str, label: str) -> JSONResponse:
     body = json.loads(await request.body())
-    STATE["openai"] = int(STATE["openai"]) + 1  # type: ignore[call-overload]
+    STATE[provider] = int(STATE[provider]) + 1  # type: ignore[call-overload]
     STATE["models"].append(body["model"])  # type: ignore[attr-defined]
+    STATE["requests"].append({"provider": provider, "body": body})  # type: ignore[attr-defined]
+    n = STATE[provider]
+    reasoning = FAKE_REASONING if provider == "xai" else 0
     await asyncio.sleep(float(STATE["delay"]))  # type: ignore[arg-type]
     return JSONResponse(
         {
-            "id": f"resp_fake_{STATE['openai']}",
+            "id": f"resp_fake_{provider}_{n}",
             "object": "response",
             "created_at": int(time.time()),
             "status": "completed",
@@ -74,7 +96,7 @@ async def openai_responses(request: Request) -> JSONResponse:
                     "content": [
                         {
                             "type": "output_text",
-                            "text": f"[FAKE PROVIDER] OpenAI answer #{STATE['openai']}.{STATE['suffix']}",
+                            "text": f"[FAKE PROVIDER] {label} answer #{n}.{STATE['suffix']}",
                             "annotations": [],
                         }
                     ],
@@ -88,7 +110,7 @@ async def openai_responses(request: Request) -> JSONResponse:
                 "output_tokens": FAKE_OUT,
                 "total_tokens": FAKE_IN + FAKE_OUT,
                 "input_tokens_details": {"cached_tokens": 0},
-                "output_tokens_details": {"reasoning_tokens": 0},
+                "output_tokens_details": {"reasoning_tokens": reasoning},
             },
         }
     )
@@ -106,6 +128,7 @@ app = Starlette(
     routes=[
         Route("/v1/messages", anthropic_messages, methods=["POST"]),
         Route("/v1/responses", openai_responses, methods=["POST"]),
+        Route("/xai/v1/responses", xai_responses, methods=["POST"]),
         Route("/calls", calls),
         Route("/health", health),
     ]

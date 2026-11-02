@@ -211,7 +211,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
         settled = await model_port.settle_stale_reservations()
         if settled:
             log.warning("settled %d stale budget reservations as fully spent", settled)
-        for var in ("ANTHROPIC_BASE_URL", "OPENAI_BASE_URL"):
+        for var in ("ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "XAI_BASE_URL"):
             if os.environ.get(var):
                 log.warning(
                     "%s is set: provider requests (and API keys) go to %s instead of the official API",
