@@ -20,7 +20,7 @@ Branch: `agent/claude/milestone-a`. Not merged until the owner approves.
 | Messages persist across a server restart | `test_messages_persist_across_server_restart` |
 | Dashboard: sign-in, three-pane chat, room creation, live updates without refresh, reconnect with catch-up and no duplicates, light and dark themes, phone layout | `apps/web` unit tests; `tests/e2e/milestone-a.spec.ts` in Chrome |
 | Security hardening from the independent review (see below) | `backend/tests/test_security.py` |
-| One-command startup with Docker Compose, published on 127.0.0.1 only | `docker-compose.yml` (see "Not yet verified") |
+| One-command startup with Docker Compose, published on 127.0.0.1 only | Verified by the owner on Windows (see below) |
 
 Screenshots: [`docs/screenshots/milestone-a-dashboard.png`](screenshots/milestone-a-dashboard.png), [`docs/screenshots/milestone-a-mobile.png`](screenshots/milestone-a-mobile.png)
 
@@ -56,15 +56,15 @@ Also closed now: Host header allowlist (DNS-rebinding guard), API docs off by de
 
 Tracked for later milestones: session table cleanup, WebSocket connection caps, masking message text in database error logs, image digest pinning and Docker secrets, validating `reply_to` and `mentions` against real messages and members (needed once agents join in Milestone B).
 
-### Not yet verified
+### Owner verification (Nov 2, 2026)
 
-- **`docker compose up` on a real machine.** The build environment has no Docker engine and cannot reach Docker Hub, so the Compose file and Dockerfile are validated for syntax only. The owner's first run is the real test.
+Verified by the owner on Windows with Docker Desktop 29.9.2 (WSL 2): `docker compose up --build` built and started both containers, the database initialized, health checks passed, sign-in worked at http://localhost:8000, a message persisted, and messages appeared live in two browser tabs without refreshing.
 
 ## What the owner needs to provide
 
 | For | Item |
 | --- | --- |
-| Milestone A sign-off | Run `docker compose up --build` (see README) and confirm it works; approve the PR |
+| Milestone A sign-off | Docker run verified; approve PR #3 for merge |
 | Milestone B | Anthropic and OpenAI API keys, added to a local `.env` (never pasted into chat or committed). Approved live-test budget: $10 total, enforced in code before any live call |
 | Milestone B (optional) | Allow `api.openai.com` in claude.ai Settings > Capabilities so OpenAI can be tested in the cloud build environment; otherwise OpenAI live tests run on your machine |
 
