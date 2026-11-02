@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/No3lito/multi-ai-command-center/packages/protocol/ccmp.schema.json",
+  "title": "CCMP v1 Message",
+  "description": "Command Center Message Protocol v1. Every participant (human, built-in agent, external AI client) sends and receives this envelope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "protocol", "seq", "room_id", "sender", "kind", "body", "created_at"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^msg_[0-9a-f]{32}$"},
+    "protocol": {"const": "ccmp/1"},
+    "seq": {"type": "integer", "minimum": 1, "description": "Gap-free and monotonic within a room (1, 2, 3, ...); assigned under a per-room lock so messages commit in seq order. Clients resume a room with after_seq."},
+    "room_id": {"type": "string", "pattern": "^room_[0-9a-f]{32}$"},
+    "thread_id": {"type": ["string", "null"]},
+    "sender": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principal_id", "kind", "display_name"],
+      "properties": {
+        "principal_id": {"type": "string", "pattern": "^(usr|agt|ext|sys)_[0-9a-f]{32}$"},
+        "kind": {"enum": ["owner", "human", "agent", "external", "system"]},
+        "display_name": {"type": "string", "minLength": 1, "maxLength": 80}
+      }
+    },
+    "kind": {
+      "enum": [
+        "chat",
+        "task.assign",
+        "task.result",
+        "task.status",
+        "tool.request",
+        "tool.result",
+        "approval.request",
+        "approval.decision",
+        "artifact",
+        "error",
+        "control"
+      ]
+    },
+    "reply_to": {"type": ["string", "null"], "pattern": "^msg_[0-9a-f]{32}$"},
+    "mentions": {"type": "array", "items": {"type": "string"}, "maxItems": 50},
+    "body": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": {"type": "string", "maxLength": 32000},
+        "data": {"type": ["object", "null"]}
+      }
+    },
+    "task_id": {"type": ["string", "null"]},
+    "correlation_id": {"type": ["string", "null"]},
+    "usage": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0},
+        "cost_usd": {"type": "number", "minimum": 0}
+      }
+    },
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

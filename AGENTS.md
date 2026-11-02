@@ -8,13 +8,12 @@ Multi-AI Command Center is a locally controlled platform where multiple independ
 
 ## Current phase
 
-**Phase 1 (Technical Discovery) is complete and awaiting the owner's approval.** Until the owner explicitly approves the architecture in writing:
+**Phase 2 is in progress, delivered as small working milestones (A to D).** The architecture (Revision 1) is approved and merged. Current status, what works, and blockers: [`docs/status.md`](docs/status.md).
 
-- Do not write application code.
-- Reviews, critiques, research and proposed edits to `docs/` are welcome.
-- Disagree openly. If you think a decision in the Phase 1 report is wrong, say so with evidence.
-
-Source of truth: [`docs/phase-1-technical-discovery.md`](docs/phase-1-technical-discovery.md).
+- Implementation work is allowed on branches, one milestone or topic per branch. Nothing merges to `main` without the owner's approval.
+- Follow the approved architecture: [`docs/phase-1-technical-discovery.md`](docs/phase-1-technical-discovery.md). API contracts live in [`docs/api/`](docs/api/); the shared message schema is [`packages/protocol/ccmp.schema.json`](packages/protocol/ccmp.schema.json).
+- Prefer working, tested code over new planning documents.
+- Disagree openly. If you think a decision is wrong, say so with evidence in an issue or PR.
 
 ## How to contribute
 
