@@ -145,7 +145,10 @@ async def _find_by_key(session: AsyncSession, sender_id: str, key: str) -> CCMPM
 async def post_message(
     session: AsyncSession, room_id: str, sender: models.Principal, data: MessageCreateIn
 ) -> PostResult:
-    existing = await _find_by_key(session, sender.id, data.idempotency_key)
+    # Read plain values up front: a rollback below expires ORM objects, and touching an
+    # expired attribute would trigger a lazy load, which is not allowed in async code.
+    sender_id = sender.id
+    existing = await _find_by_key(session, sender_id, data.idempotency_key)
     if existing is not None:
         if existing.room_id != room_id:
             raise ValueError("idempotency_key already used for a different room")
@@ -163,7 +166,7 @@ async def post_message(
         id=new_id("msg"),
         room_id=room_id,
         seq=seq,
-        sender_id=sender.id,
+        sender_id=sender_id,
         kind=data.kind,
         reply_to=data.reply_to,
         mentions=list(data.mentions),
@@ -186,9 +189,11 @@ async def post_message(
         if msg in session:
             session.expunge(msg)  # never let autoflush retry the losing insert
         with session.no_autoflush:
-            existing = await _find_by_key(session, sender.id, data.idempotency_key)
+            existing = await _find_by_key(session, sender_id, data.idempotency_key)
         if existing is None:
             raise
+        if existing.room_id != room_id:
+            raise ValueError("idempotency_key already used for a different room") from None
         return PostResult(existing, created=False)
     await session.refresh(msg)
     return PostResult(to_ccmp(msg, sender), created=True)

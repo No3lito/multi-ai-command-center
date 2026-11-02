@@ -10,7 +10,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # hide_input_in_errors: a rejected OWNER_PASSWORD must never be echoed into logs.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True
+    )
 
     database_url: str = Field(
         description="SQLAlchemy async URL, e.g. postgresql+asyncpg://user:pass@localhost:5432/command_center"
@@ -19,9 +22,8 @@ class Settings(BaseSettings):
     owner_display_name: str = "Owner"
 
     # Comma-separated list of origins allowed for browser requests and WebSockets.
-    allowed_origins: str = (
-        "http://localhost:8000,http://127.0.0.1:8000,http://localhost:3000,http://127.0.0.1:3000"
-    )
+    # Only the app's own origin by default. The dashboard dev server (:3000) must be added explicitly.
+    allowed_origins: str = "http://localhost:8000,http://127.0.0.1:8000"
     session_ttl_hours: int = 12
     cookie_secure: bool = False  # set true when served over HTTPS
 
@@ -29,6 +31,8 @@ class Settings(BaseSettings):
     login_window_seconds: int = 300
 
     ws_heartbeat_seconds: float = 15.0
+    max_body_bytes: int = 128 * 1024
+    enable_api_docs: bool = False
     web_dist: Path = Path(__file__).resolve().parents[2] / "apps" / "web" / "out"
     log_level: str = "INFO"
 
@@ -49,6 +53,16 @@ class Settings(BaseSettings):
     @property
     def origins(self) -> set[str]:
         return {o.strip().rstrip("/") for o in self.allowed_origins.split(",") if o.strip()}
+
+    @property
+    def allowed_hosts(self) -> list[str]:
+        """Host header allowlist (DNS-rebinding guard): hosts of the allowed origins plus loopback."""
+        hosts = {"localhost", "127.0.0.1"}
+        for origin in self.origins:
+            host = origin.split("://", 1)[-1].split("/", 1)[0].rsplit(":", 1)[0]
+            if host:
+                hosts.add(host)
+        return sorted(hosts)
 
     @property
     def asyncpg_dsn(self) -> str:

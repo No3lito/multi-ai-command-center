@@ -21,6 +21,8 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from command_center import auth
 from command_center.config import Settings, get_settings
@@ -44,6 +46,69 @@ from command_center.protocol import (
 log = logging.getLogger(__name__)
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+MAX_SEQ = 2**63 - 1  # Postgres BIGINT
+
+
+class BodySizeLimit:
+    """Reject request bodies over a limit before they are buffered or parsed (413).
+
+    Checks Content-Length up front and counts streamed bytes, so chunked bodies are capped too.
+    """
+
+    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        for name, value in scope.get("headers", []):
+            if name == b"content-length":
+                try:
+                    too_big = int(value) > self.max_bytes
+                except ValueError:
+                    too_big = True
+                if too_big:
+                    await self._reject(send)
+                    return
+        received = 0
+        rejected = False
+
+        async def guarded_send(message: Message) -> None:
+            # After a 413 has been sent, drop whatever the app tries to send.
+            if not rejected:
+                await send(message)
+
+        async def limited_receive() -> Message:
+            nonlocal received, rejected
+            if rejected:
+                return {"type": "http.disconnect"}
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    await self._reject(send)
+                    rejected = True
+                    return {"type": "http.disconnect"}
+            return message
+
+        await self.app(scope, limited_receive, guarded_send)
+
+    @staticmethod
+    async def _reject(send: Send) -> None:
+        body = b'{"error":{"code":"payload_too_large","message":"Request body too large"}}'
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
 
 
 class ApiError(Exception):
@@ -146,8 +211,8 @@ def create_app(config: Settings | None = None) -> FastAPI:
         title="Multi-AI Command Center",
         version="0.1.0",
         lifespan=lifespan,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        docs_url="/api/docs" if settings.enable_api_docs else None,
+        openapi_url="/api/openapi.json" if settings.enable_api_docs else None,
         redoc_url=None,
     )
     app.state.settings = settings
@@ -174,6 +239,12 @@ def create_app(config: Settings | None = None) -> FastAPI:
             return response
 
     app.add_middleware(SecurityMiddleware)
+    app.add_middleware(BodySizeLimit, max_bytes=settings.max_body_bytes)
+    # Outermost: refuse unexpected Host headers (DNS-rebinding guard).
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+
+    # Open WebSocket subscriptions per session, so logout can disconnect them immediately.
+    live_streams: dict[str, set[Any]] = {}
 
     # ------------------------------------------------------------ errors
 
@@ -279,7 +350,12 @@ def create_app(config: Settings | None = None) -> FastAPI:
 
     @app.post("/api/auth/logout", status_code=204)
     async def logout(request: Request, session: SessionDep) -> Response:
-        await auth.revoke_session(session, request.cookies.get(auth.SESSION_COOKIE))
+        token = request.cookies.get(auth.SESSION_COOKIE)
+        await auth.revoke_session(session, token)
+        if token:
+            # Wake this session's open streams; they re-check the session and close with 4401.
+            for sub in list(live_streams.get(auth.hash_token(token), ())):
+                sub.event.set()
         response = Response(status_code=204)
         response.delete_cookie(auth.SESSION_COOKIE, path="/")
         return response
@@ -328,7 +404,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
         room_id: str,
         principal: PrincipalDep,
         session: SessionDep,
-        after_seq: Annotated[int, Query(ge=0)] = 0,
+        after_seq: Annotated[int, Query(ge=0, le=MAX_SEQ)] = 0,
         limit: Annotated[int, Query(ge=1, le=200)] = 100,
     ) -> MessagePage:
         await member_room(session, room_id, principal)
@@ -364,9 +440,13 @@ def create_app(config: Settings | None = None) -> FastAPI:
         if origin is None or origin.rstrip("/") not in settings.origins:
             await reject(4403)
             return
+        if not 0 <= after_seq <= MAX_SEQ:
+            await reject(4400)
+            return
+        token = websocket.cookies.get(auth.SESSION_COOKIE)
         async with db.sessionmaker() as session:
-            principal = await auth.principal_for_token(session, websocket.cookies.get(auth.SESSION_COOKIE))
-            if principal is None:
+            principal = await auth.principal_for_token(session, token)
+            if principal is None or token is None:
                 await reject(4401)
                 return
             try:
@@ -375,8 +455,22 @@ def create_app(config: Settings | None = None) -> FastAPI:
                 await reject(4404)
                 return
         await websocket.accept()
-        last_sent = max(after_seq, 0)
+        last_sent = after_seq
+        token_key = auth.hash_token(token)
         sub = hub.subscribe(room_id)  # subscribe before replay so nothing falls in the gap
+        live_streams.setdefault(token_key, set()).add(sub)
+
+        async def still_authorized() -> bool:
+            # Re-checked on every wake-up: logout, expiry or removal ends the stream.
+            async with db.sessionmaker() as s:
+                p = await auth.principal_for_token(s, token)
+                if p is None:
+                    return False
+                try:
+                    await service.ensure_member(s, room_id, p.id)
+                except (service.RoomNotFound, service.NotAMember):
+                    return False
+            return True
 
         async def flush() -> None:
             nonlocal last_sent
@@ -390,10 +484,11 @@ def create_app(config: Settings | None = None) -> FastAPI:
                     return
 
         async def reader() -> None:
-            # Drain client frames (pongs); returns when the client disconnects.
-            with contextlib.suppress(WebSocketDisconnect):
-                while True:
-                    await websocket.receive_text()
+            # Drain client frames (pongs). Binary or unexpected frames are ignored, never fatal.
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    return
 
         reader_task = asyncio.create_task(reader())
         try:
@@ -403,6 +498,9 @@ def create_app(config: Settings | None = None) -> FastAPI:
                 signalled = await sub.wait(settings.ws_heartbeat_seconds)
                 if reader_task.done():
                     break
+                if not await still_authorized():
+                    await websocket.close(code=4401)
+                    break
                 if not signalled:
                     await websocket.send_json({"type": "ping", "ts": datetime.now(UTC).isoformat()})
                 await flush()  # on signal, and on every heartbeat as a safety net
@@ -410,8 +508,13 @@ def create_app(config: Settings | None = None) -> FastAPI:
             pass
         finally:
             sub.close()
+            streams = live_streams.get(token_key)
+            if streams is not None:
+                streams.discard(sub)
+                if not streams:
+                    live_streams.pop(token_key, None)
             reader_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, WebSocketDisconnect):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await reader_task
 
     # ------------------------------------------------------------ dashboard

@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import secrets
 import time
-from collections import defaultdict, deque
+from collections import deque
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
@@ -32,23 +32,35 @@ def password_matches(candidate: str, settings: Settings) -> bool:
 class LoginRateLimiter:
     """Failed-attempt limiter per client key. In-process; the API runs as one process in Milestone A."""
 
+    MAX_TRACKED = 10_000  # bound memory if many distinct clients fail
+
     def __init__(self, max_failures: int, window_seconds: int) -> None:
         self.max_failures = max_failures
         self.window = window_seconds
-        self._failures: dict[str, deque[float]] = defaultdict(deque)
+        self._failures: dict[str, deque[float]] = {}
 
-    def _prune(self, key: str, now: float) -> deque[float]:
-        q = self._failures[key]
+    def _recent(self, key: str, now: float) -> int:
+        q = self._failures.get(key)
+        if q is None:
+            return 0
         while q and now - q[0] > self.window:
             q.popleft()
-        return q
+        if not q:
+            del self._failures[key]  # no empty entries left behind
+            return 0
+        return len(q)
 
     def blocked(self, key: str) -> bool:
-        return len(self._prune(key, time.monotonic())) >= self.max_failures
+        return self._recent(key, time.monotonic()) >= self.max_failures
 
     def record_failure(self, key: str) -> None:
         now = time.monotonic()
-        self._prune(key, now).append(now)
+        self._recent(key, now)
+        if key not in self._failures and len(self._failures) >= self.MAX_TRACKED:
+            # Evict the entry whose newest failure is oldest.
+            oldest = min(self._failures, key=lambda k: self._failures[k][-1])
+            del self._failures[oldest]
+        self._failures.setdefault(key, deque()).append(now)
 
     def reset(self, key: str) -> None:
         self._failures.pop(key, None)

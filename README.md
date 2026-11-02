@@ -40,7 +40,9 @@ export DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/command_center
 export OWNER_PASSWORD=choose-a-long-password
 uv sync
 uv run command-center migrate
-uv run uvicorn command_center.main:app --reload --port 8000
+# Allow the dev dashboard origin (:3000) in addition to the app itself
+export ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000,http://localhost:3000,http://127.0.0.1:3000
+uv run uvicorn command_center.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers
 
 # Dashboard with hot reload (http://localhost:3000, proxies /api to :8000)
 cd apps/web

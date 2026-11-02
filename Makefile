@@ -26,7 +26,8 @@ lint:
 	cd apps/web && npm run lint && npm run typecheck
 
 dev-backend:   ## API with auto-reload on :8000 (needs DATABASE_URL and OWNER_PASSWORD)
-	cd backend && uv run command-center migrate && uv run uvicorn command_center.main:app --reload --port 8000
+	cd backend && ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000,http://localhost:3000,http://127.0.0.1:3000 \
+	  sh -c 'uv run command-center migrate && uv run uvicorn command_center.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers'
 
 dev-web:       ## Dashboard dev server on :3000, proxying /api to :8000
 	cd apps/web && NEXT_PUBLIC_WS_BASE=ws://localhost:8000 npm run dev

@@ -82,6 +82,7 @@ def run_server(database_url: str, tmp_path: Path, **extra_env: str) -> Iterator[
                 "127.0.0.1",
                 "--port",
                 str(port),
+                "--no-proxy-headers",
             ],
             cwd=BACKEND,
             env=env,

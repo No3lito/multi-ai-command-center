@@ -50,6 +50,7 @@ def main() -> None:
                 "127.0.0.1",
                 "--port",
                 str(args.port),
+                "--no-proxy-headers",
             ],
             cwd=BACKEND,
             env=env,

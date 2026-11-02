@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+
+PRINCIPAL_ID = r"^(usr|agt|ext|sys)_[0-9a-f]{32}$"
 
 MessageKind = Literal[
     "chat",
@@ -121,5 +123,8 @@ class MessageCreateIn(Strict):
     kind: Literal["chat"] = "chat"
     body: ChatBodyIn
     reply_to: str | None = Field(default=None, pattern=r"^msg_[0-9a-f]{32}$")
-    mentions: list[str] = Field(default_factory=list, max_length=50)
+    # Mentions are principal ids only (bounded size), never free text.
+    mentions: list[Annotated[str, StringConstraints(pattern=PRINCIPAL_ID)]] = Field(
+        default_factory=list, max_length=50
+    )
     idempotency_key: str = Field(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9._:-]+$")

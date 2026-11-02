@@ -38,7 +38,7 @@
       ]
     },
     "reply_to": {"type": ["string", "null"], "pattern": "^msg_[0-9a-f]{32}$"},
-    "mentions": {"type": "array", "items": {"type": "string"}, "maxItems": 50},
+    "mentions": {"type": "array", "items": {"type": "string", "pattern": "^(usr|agt|ext|sys)_[0-9a-f]{32}$"}, "maxItems": 50},
     "body": {
       "type": "object",
       "additionalProperties": false,
