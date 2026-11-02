@@ -35,6 +35,7 @@ FAKE_IN, FAKE_OUT = 100, 50  # fixed token usage per call, so expected cost is e
 async def anthropic_messages(request: Request) -> JSONResponse:
     body = json.loads(await request.body())
     STATE["anthropic"] = int(STATE["anthropic"]) + 1  # type: ignore[call-overload]
+    STATE["requests"].append({"provider": "anthropic", "body": body})  # type: ignore[attr-defined]
     STATE["models"].append(body["model"])  # type: ignore[attr-defined]
     await asyncio.sleep(float(STATE["delay"]))  # type: ignore[arg-type]
     return JSONResponse(

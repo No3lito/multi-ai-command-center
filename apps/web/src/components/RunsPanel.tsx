@@ -9,6 +9,7 @@ import { ErrorText, PanelSection, Pill, type PillTone } from "./PanelSection";
 const STATUS: Record<RunStatus, { label: string; tone: PillTone }> = {
   queued: { label: "Queued", tone: "muted" },
   running: { label: "Running", tone: "accent" },
+  waiting: { label: "Waiting", tone: "warn" },
   completed: { label: "Completed", tone: "ok" },
   failed: { label: "Failed", tone: "danger" },
   cancelled: { label: "Cancelled", tone: "muted" },
@@ -25,47 +26,24 @@ interface Props {
   onRetry: () => void;
 }
 
-export function RunsPanel({
-  hasRoom,
-  runs,
-  loaded,
-  error,
-  agentName,
-  onCancel,
-  onRetry,
-}: Props) {
+export function RunsPanel({ hasRoom, runs, loaded, error, agentName, onCancel, onRetry }: Props) {
   return (
-    <PanelSection
-      title="Runs"
-      count={hasRoom ? runs.length : undefined}
-      testId="runs-panel"
-    >
+    <PanelSection title="Runs" count={hasRoom ? runs.length : undefined} testId="runs-panel">
       {!hasRoom ? (
         <p className="text-xs text-muted">No room selected.</p>
       ) : (
         <>
           {!loaded && <p className="text-xs text-muted">Loading...</p>}
-          {loaded && runs.length === 0 && !error && (
-            <p className="text-xs text-muted">No runs yet.</p>
-          )}
+          {loaded && runs.length === 0 && !error && <p className="text-xs text-muted">No runs yet.</p>}
           <ul className="space-y-2">
             {runs.map((r) => (
-              <RunItem
-                key={r.id}
-                run={r}
-                agentName={agentName}
-                onCancel={onCancel}
-              />
+              <RunItem key={r.id} run={r} agentName={agentName} onCancel={onCancel} />
             ))}
           </ul>
           {error && (
             <p role="alert" className="mt-1 text-xs text-danger">
               {error}{" "}
-              <button
-                type="button"
-                onClick={onRetry}
-                className="font-medium text-fg underline"
-              >
+              <button type="button" onClick={onRetry} className="font-medium text-fg underline">
                 Retry
               </button>
             </p>
@@ -91,14 +69,20 @@ function RunItem({
   const active = isRunActive(run);
   const who =
     run.kind === "collab"
-      ? [agentName(run.planner_id), agentName(run.critic_id)]
-          .filter(Boolean)
-          .join(" and ")
+      ? [agentName(run.planner_id), agentName(run.critic_id)].filter(Boolean).join(" and ")
       : run.kind === "build"
         ? `${[agentName(run.planner_id), agentName(run.critic_id)].filter(Boolean).join(" and ")} design, ${
             agentName(run.builder_id ?? null) ?? "builder"
           } builds`
-        : agentName(run.agent_id);
+        : run.kind === "review"
+          ? `${agentName(run.builder_id ?? null) ?? "worker"}'s work, reviewed by ${[
+              agentName(run.planner_id),
+              agentName(run.critic_id),
+            ]
+              .filter(Boolean)
+              .join(" and ")}`
+          : agentName(run.agent_id);
+  const waitingFor = run.status === "waiting" ? (agentName(run.waiting_for ?? null) ?? "an external agent") : null;
 
   async function cancel() {
     setBusy(true);
@@ -121,11 +105,9 @@ function RunItem({
     >
       <div className="flex items-center gap-1.5">
         <Pill tone={s.tone} testId="run-status" value={run.status}>
-          {s.label}
+          {waitingFor ? `Waiting for ${waitingFor}` : s.label}
         </Pill>
-        <span className="font-mono text-[10px] uppercase text-muted">
-          {run.kind}
-        </span>
+        <span className="font-mono text-[10px] uppercase text-muted">{run.kind}</span>
         {run.simulated && (
           <span
             data-testid="run-simulated"
@@ -164,9 +146,7 @@ function RunItem({
           {formatUsd(run.spent_usd)} of {formatUsd(run.budget_usd)}
         </dd>
       </dl>
-      {run.error && (
-        <p className="mt-1 break-words text-[11px] text-danger">{run.error}</p>
-      )}
+      {run.error && <p className="mt-1 break-words text-[11px] text-danger">{run.error}</p>}
       {error && <ErrorText>{error}</ErrorText>}
     </li>
   );

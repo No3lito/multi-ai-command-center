@@ -48,6 +48,7 @@ class Server:
     origin: str
     proc: subprocess.Popen[bytes]
     log_path: Path
+    mcp_url: str = ""
 
     @property
     def ws_base(self) -> str:
@@ -60,8 +61,10 @@ class Server:
 @contextmanager
 def run_server(database_url: str, tmp_path: Path, **extra_env: str) -> Iterator[Server]:
     port = _free_port()
+    mcp_port = _free_port()
     base = f"http://127.0.0.1:{port}"
     log_path = tmp_path / f"server-{port}.log"
+    extra_env.setdefault("MCP_PORT", str(mcp_port))
     env = dict(
         os.environ,
         DATABASE_URL=database_url,
@@ -90,7 +93,7 @@ def run_server(database_url: str, tmp_path: Path, **extra_env: str) -> Iterator[
             stdout=log,
             stderr=subprocess.STDOUT,
         )
-    server = Server(base, base, proc, log_path)
+    server = Server(base, base, proc, log_path, mcp_url=f"http://127.0.0.1:{extra_env['MCP_PORT']}/mcp")
     try:
         deadline = time.monotonic() + 20
         while True:

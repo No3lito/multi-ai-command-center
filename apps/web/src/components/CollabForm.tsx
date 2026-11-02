@@ -8,6 +8,7 @@ import {
   RUN_MAX_TURNS_DEFAULT,
   isAgentUsable,
   type CreateRunBody,
+  type Principal,
   type Run,
   type RunWorkflow,
 } from "@/lib/types";
@@ -19,8 +20,10 @@ export interface CollabInput {
   plannerId: string;
   criticId: string;
   budget: string;
-  /** Only for the design & build workflow. */
+  /** Only for the design & build and review workflows. */
   builderId?: string;
+  /** "review" changes the wording of the role errors. */
+  workflow?: RunWorkflow;
 }
 
 export type CollabErrors = Partial<Record<keyof CollabInput, string>>;
@@ -35,40 +38,36 @@ export function validateCollab(input: CollabInput): CollabErrors {
     else if (input.plannerId && input.plannerId === input.criticId)
       errors.criticId = "Planner and critic must be different agents.";
   } else {
-    if (!input.criticId) errors.criticId = "Pick a co-designer.";
+    const review = input.workflow === "review";
+    const [pair, single, worker] = review
+      ? ["reviewers", "co-reviewer", "worker"]
+      : ["designers", "co-designer", "builder"];
+    if (!input.criticId) errors.criticId = `Pick a ${single}.`;
     else if (input.plannerId && input.plannerId === input.criticId)
-      errors.criticId = "The two designers must be different agents.";
-    if (!input.builderId) errors.builderId = "Pick a builder.";
-    else if (
-      input.builderId === input.plannerId ||
-      input.builderId === input.criticId
-    )
-      errors.builderId =
-        "The builder must be a different agent from the designers.";
+      errors.criticId = `The two ${pair} must be different agents.`;
+    if (!input.builderId) errors.builderId = `Pick a ${worker}.`;
+    else if (input.builderId === input.plannerId || input.builderId === input.criticId)
+      errors.builderId = `The ${worker} must be a different agent from the ${pair}.`;
   }
   const raw = input.budget.trim();
   const budget = Number(raw);
-  if (!raw || !Number.isFinite(budget))
-    errors.budget = "Enter a budget in USD.";
+  if (!raw || !Number.isFinite(budget)) errors.budget = "Enter a budget in USD.";
   else if (budget <= 0) errors.budget = "Budget must be more than $0.";
-  else if (budget > RUN_BUDGET_MAX)
-    errors.budget = `Budget can be at most $${RUN_BUDGET_MAX.toFixed(2)}.`;
+  else if (budget > RUN_BUDGET_MAX) errors.budget = `Budget can be at most $${RUN_BUDGET_MAX.toFixed(2)}.`;
   return errors;
 }
 
 interface Props {
   roomId: string | null;
   roomAgents: RoomAgent[];
+  /** Connected external agents in the room (for example Grok Bot over MCP). They can be the
+   * builder or the worker, never a designer or reviewer. */
+  externals?: Principal[];
   createRun: (roomId: string, body: CreateRunBody) => Promise<Run>;
   onStarted: (run: Run) => void;
 }
 
-export function CollabForm({
-  roomId,
-  roomAgents,
-  createRun,
-  onStarted,
-}: Props) {
+export function CollabForm({ roomId, roomAgents, externals = [], createRun, onStarted }: Props) {
   const usable = roomAgents.filter((r) => r.agent && isAgentUsable(r.agent));
   const [goal, setGoal] = useState("");
   const [workflowSel, setWorkflowSel] = useState<RunWorkflow | null>(null);
@@ -89,28 +88,39 @@ export function CollabForm({
     why: useId(),
   };
 
-  // Design & build is the default once three agents can run.
+  // Review & improve is the default when an external agent (Grok Bot) is connected here;
+  // otherwise design & build once three agents can run.
   const workflow: RunWorkflow =
-    workflowSel ?? (usable.length >= 3 ? "build" : "collab");
+    workflowSel ?? (externals.length > 0 && usable.length >= 2 ? "review" : usable.length >= 3 ? "build" : "collab");
   const build = workflow === "build";
+  const review = workflow === "review";
+  const withWorker = build || review;
   const usableIds = usable.map((r) => r.member.id);
-  // Default builder: an agent whose role is Builder, else the last usable agent.
+  // Default builder or worker: a connected external agent for reviews, else an agent whose
+  // role is Builder, else the last usable agent.
   const builderDefault =
+    (review ? externals[0]?.id : undefined) ??
     usable.find((r) => r.agent?.role.toLowerCase() === "builder")?.member.id ??
+    externals[0]?.id ??
     usableIds[usableIds.length - 1] ??
     "";
-  const builderId = build ? (builderSel ?? builderDefault) : "";
+  const builderId = withWorker ? (builderSel ?? builderDefault) : "";
   const designers = usableIds.filter((id) => id !== builderId);
   const plannerId = plannerSel ?? designers[0] ?? "";
   const criticId = criticSel ?? designers.find((id) => id !== plannerId) ?? "";
-  const notEnough = usable.length < (build ? 3 : 2);
+  const notEnough = withWorker ? usable.length < 2 || usable.length + externals.length < 3 : usable.length < 2;
   const blocked = !roomId || notEnough;
+  const labels: readonly [string, string, string] = review
+    ? ["Lead reviewer", "Co-reviewer", "Worker (shares its work, gets the plan)"]
+    : build
+      ? ["Designer", "Co-designer", "Builder (follows the designers exactly)"]
+      : ["Planner", "Critic", ""];
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (blocked || busy || !roomId) return;
-    const input: CollabInput = build
-      ? { goal, plannerId, criticId, budget, builderId }
+    const input: CollabInput = withWorker
+      ? { goal, plannerId, criticId, budget, builderId, workflow }
       : { goal, plannerId, criticId, budget };
     const found = validateCollab(input);
     setErrors(found);
@@ -125,16 +135,11 @@ export function CollabForm({
         budget_usd: Math.round(Number(budget) * 100) / 100,
         max_turns: RUN_MAX_TURNS_DEFAULT,
       };
-      const run = await createRun(
-        roomId,
-        build ? { ...body, workflow: "build", builder_id: builderId } : body,
-      );
+      const run = await createRun(roomId, withWorker ? { ...body, workflow, builder_id: builderId } : body);
       setGoal("");
       onStarted(run);
     } catch (err) {
-      setServerError(
-        isApiError(err) ? err.message : "Could not start the run.",
-      );
+      setServerError(isApiError(err) ? err.message : "Could not start the run.");
     } finally {
       setBusy(false);
     }
@@ -181,18 +186,15 @@ export function CollabForm({
             }}
             className={fieldClass}
           >
-            <option value="build">
-              Design &amp; build: two designers, one builder
-            </option>
-            <option value="collab">
-              Plan &amp; review: planner and critic
-            </option>
+            <option value="review">Review &amp; improve: an agent&apos;s work, reviewed by two</option>
+            <option value="build">Design &amp; build: two designers, one builder</option>
+            <option value="collab">Plan &amp; review: planner and critic</option>
           </select>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <AgentSelect
             id={ids.planner}
-            label={build ? "Designer" : "Planner"}
+            label={labels[0]}
             testId="collab-planner"
             value={plannerId}
             onChange={(v) => {
@@ -210,7 +212,7 @@ export function CollabForm({
           />
           <AgentSelect
             id={ids.critic}
-            label={build ? "Co-designer" : "Critic"}
+            label={labels[1]}
             testId="collab-critic"
             value={criticId}
             onChange={(v) => {
@@ -223,14 +225,13 @@ export function CollabForm({
             labelClass={labelClass}
           />
         </div>
-        {(errors.plannerId || errors.criticId) && (
-          <ErrorText>{errors.plannerId ?? errors.criticId}</ErrorText>
-        )}
-        {build && (
+        {(errors.plannerId || errors.criticId) && <ErrorText>{errors.plannerId ?? errors.criticId}</ErrorText>}
+        {withWorker && (
           <>
             <AgentSelect
               id={ids.builder}
-              label="Builder (follows the designers exactly)"
+              label={labels[2]}
+              externals={externals}
               testId="collab-builder"
               value={builderId}
               onChange={(v) => {
@@ -261,8 +262,7 @@ export function CollabForm({
               value={budget}
               onChange={(e) => {
                 setBudget(e.target.value);
-                if (errors.budget)
-                  setErrors((p) => ({ ...p, budget: undefined }));
+                if (errors.budget) setErrors((p) => ({ ...p, budget: undefined }));
               }}
               aria-invalid={errors.budget ? true : undefined}
               className={`${fieldClass} font-mono`}
@@ -279,18 +279,12 @@ export function CollabForm({
           </button>
         </div>
         {errors.budget && <ErrorText>{errors.budget}</ErrorText>}
-        <p className="text-[10px] text-muted">
-          Max ${RUN_BUDGET_MAX.toFixed(2)} per run. Simulated runs cost nothing.
-        </p>
+        <p className="text-[10px] text-muted">Max ${RUN_BUDGET_MAX.toFixed(2)} per run. Simulated runs cost nothing.</p>
         {roomId && notEnough && (
-          <p
-            id={ids.why}
-            data-testid="collab-blocked"
-            className="text-xs text-warn"
-          >
-            Needs at least {build ? "three" : "two"} agents in this room that
-            can run (status Live or Simulated). Add an agent or configure its
-            API key.
+          <p id={ids.why} data-testid="collab-blocked" className="text-xs text-warn">
+            Needs at least {withWorker ? "three" : "two"} agents in this room that can run (status Live or Simulated
+            {withWorker ? ", or a connection such as Grok Bot as the worker" : ""}
+            ). Add an agent or configure its API key.
           </p>
         )}
         {serverError && <ErrorText>{serverError}</ErrorText>}
@@ -306,6 +300,7 @@ function AgentSelect({
   value,
   onChange,
   roomAgents,
+  externals = [],
   invalid,
   className,
   labelClass,
@@ -316,6 +311,7 @@ function AgentSelect({
   value: string;
   onChange: (v: string) => void;
   roomAgents: RoomAgent[];
+  externals?: Principal[];
   invalid: boolean;
   className: string;
   labelClass: string;
@@ -344,6 +340,11 @@ function AgentSelect({
             </option>
           );
         })}
+        {externals.map((p) => (
+          <option key={p.id} value={p.id}>
+            {`${p.display_name} (connected)`}
+          </option>
+        ))}
       </select>
     </div>
   );
