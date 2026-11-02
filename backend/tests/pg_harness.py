@@ -51,6 +51,10 @@ def temporary_postgres() -> Iterator[str]:
     data = root / "data"
     if os.geteuid() == 0:
         shutil.chown(root, "postgres", "postgres")
+    marker = os.environ.get("CC_PG_ROOT_FILE")
+    if marker:
+        # Lets an external teardown stop this cluster if our process is killed before cleanup.
+        Path(marker).write_text(str(root))
     port = _free_port()
     password = "test-only-password"
     pwfile = root / "pw"
