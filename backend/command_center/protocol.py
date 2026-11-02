@@ -183,7 +183,7 @@ class ConnectionIn(Strict):
     """An external agent (for example Grok Bot) that connects over MCP with a token."""
 
     display_name: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$")
-    # Rooms it may work in; defaults to General.
+    # Rooms it may work in (at least one). Everything in them is visible to the agent.
     room_ids: list[str] = Field(default_factory=list, max_length=50)
 
 

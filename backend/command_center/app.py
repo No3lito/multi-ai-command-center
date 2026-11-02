@@ -267,6 +267,10 @@ def create_app(config: Settings | None = None) -> FastAPI:
                     proxy_headers=False,
                     log_level="warning",
                     lifespan="on",
+                    ws="none",
+                    # Bounded connections, so the gateway cannot starve the dashboard and worker.
+                    limit_concurrency=64,
+                    timeout_keep_alive=5,
                 )
             )
             gateway_task = asyncio.create_task(gateway.serve(), name="mcp-gateway")

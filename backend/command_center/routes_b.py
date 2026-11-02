@@ -446,8 +446,9 @@ def register(
             raise api_error(409, "connection_exists", "An agent or connection with that name already exists")
         room_ids = list(dict.fromkeys(body.room_ids))
         if not room_ids:
-            general = await session.scalar(select(models.Room.id).where(models.Room.name == "General"))
-            room_ids = [general] if general else []
+            # Everything in a connection's rooms is sent to that agent's provider, so it only
+            # gets the rooms the owner picks (a dedicated project room), never General by default.
+            raise api_error(422, "validation_error", "room_ids: pick at least one room for this connection")
         for rid in room_ids:
             await member_room(session, rid, principal)
         p = models.Principal(

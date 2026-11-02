@@ -16,7 +16,7 @@ MAX_TRANSCRIPT_CHARS = 24_000
 # Messages of the run being executed (a design, the code built from it) are kept far more
 # completely, so a builder sees the whole design and a checker sees the whole build.
 MAX_RUN_MESSAGE_CHARS = 40_000
-MAX_RUN_TRANSCRIPT_CHARS = 80_000
+MAX_RUN_TRANSCRIPT_CHARS = 120_000
 
 PREAMBLE = (
     "You are {name}, an AI agent with the role '{role}' in the Multi-AI Command Center: a shared "
@@ -40,40 +40,69 @@ async def build_request(
     instruction: str,
     run_id: str | None = None,
 ) -> ChatRequest:
-    rows = (
-        await session.execute(
-            select(models.Message, models.Principal)
-            .join(models.Principal, models.Principal.id == models.Message.sender_id)
-            .where(models.Message.room_id == room_id)
-            .order_by(models.Message.seq.desc())
-            .limit(MAX_MESSAGES)
-        )
-    ).all()
-    lines: list[str] = []
-    total = 0
-    run_total = 0
-    for msg, sender in rows:  # newest first; stop when the budget of characters is used
-        in_run = run_id is not None and msg.correlation_id == run_id
-        limit = MAX_RUN_MESSAGE_CHARS if in_run else MAX_MESSAGE_CHARS
+    def line_for(msg: models.Message, sender: models.Principal, limit: int) -> str:
         body = msg.body_text
         if len(body) > limit:
             body = body[:limit] + " [truncated]"
         who = "you" if sender.id == agent.id else sender.kind
         # JSON escapes newlines and quotes, so message text cannot forge another speaker's line.
-        line = json.dumps(
+        return json.dumps(
             {"from": sender.display_name, "type": who, "kind": msg.kind, "text": body},
             ensure_ascii=False,
         )
-        if in_run:
-            if run_total + len(line) > MAX_RUN_TRANSCRIPT_CHARS:
-                break
-            run_total += len(line)
-        else:
-            if total + len(line) > MAX_TRANSCRIPT_CHARS:
-                break
-            total += len(line)
-        lines.append(line)
-    transcript = "\n".join(reversed(lines)) or "(no messages yet)"
+
+    # Room chat around the run: newest first, within a small budget. The run's own messages
+    # are loaded separately below, so chatter can never push the run's work out of view.
+    room_q = (
+        select(models.Message, models.Principal)
+        .join(models.Principal, models.Principal.id == models.Message.sender_id)
+        .where(models.Message.room_id == room_id)
+        .order_by(models.Message.seq.desc())
+        .limit(MAX_MESSAGES)
+    )
+    if run_id is not None:
+        room_q = room_q.where(
+            (models.Message.correlation_id.is_(None)) | (models.Message.correlation_id != run_id)
+        )
+    entries: list[tuple[int, str]] = []
+    total = 0
+    for msg, sender in (await session.execute(room_q)).all():
+        line = line_for(msg, sender, MAX_MESSAGE_CHARS)
+        if total + len(line) > MAX_TRANSCRIPT_CHARS:
+            break
+        entries.append((msg.seq, line))
+        total += len(line)
+
+    if run_id is not None:
+        run_rows = (
+            await session.execute(
+                select(models.Message, models.Principal)
+                .join(models.Principal, models.Principal.id == models.Message.sender_id)
+                .where(models.Message.room_id == room_id, models.Message.correlation_id == run_id)
+                .order_by(models.Message.seq)
+            )
+        ).all()
+        run_lines = [(m.seq, line_for(m, p, MAX_RUN_MESSAGE_CHARS)) for m, p in run_rows]
+        # Over budget: keep the start of the run (the shared work and the goal) and its latest
+        # messages, and say how many in between were left out.
+        omitted = 0
+        while len(run_lines) > 2 and sum(len(x) for _, x in run_lines) > MAX_RUN_TRANSCRIPT_CHARS:
+            run_lines.pop(len(run_lines) // 2)
+            omitted += 1
+        if omitted:
+            note = json.dumps(
+                {
+                    "from": "Coordinator",
+                    "type": "system",
+                    "kind": "note",
+                    "text": f"[{omitted} earlier run messages omitted to fit the context limit]",
+                }
+            )
+            run_lines.insert(len(run_lines) // 2, (run_lines[len(run_lines) // 2 - 1][0], note))
+        entries.extend(run_lines)
+
+    lines = [line for _, line in sorted(entries, key=lambda e: e[0])]
+    transcript = "\n".join(lines) or "(no messages yet)"
     system = PREAMBLE.format(name=agent.display_name, role=profile.role)
     if profile.system_prompt.strip():
         system += "\n\n" + profile.system_prompt.strip()

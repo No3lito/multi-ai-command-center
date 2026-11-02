@@ -53,6 +53,9 @@ async def call(client: Client, tool: str, **args: Any) -> Any:
 
 
 async def connect(c: httpx.AsyncClient, name: str = "Grok Bot", **body: Any) -> dict[str, Any]:
+    if "room_ids" not in body:
+        rooms = (await c.get("/api/rooms")).json()
+        body["room_ids"] = [next(r["id"] for r in rooms if r["name"] == "General")]
     r = await c.post("/api/connections", json={"display_name": name, **body})
     assert r.status_code == 201, r.text
     return r.json()  # type: ignore[no-any-return]
@@ -98,7 +101,17 @@ async def test_tokens_rooms_and_revocation(sim_srv: Server) -> None:
         assert [r["name"] for r in conn["rooms"]] == ["General"]
         listed = (await c.get("/api/connections")).json()
         assert [x["display_name"] for x in listed] == ["Grok Bot"] and listed[0]["token"] is None
-        assert (await c.post("/api/connections", json={"display_name": "grok bot"})).status_code == 409
+        assert (
+            await c.post(
+                "/api/connections",
+                json={
+                    "display_name": "grok bot",
+                    "room_ids": conn["rooms"][0:1] and [conn["rooms"][0]["id"]],
+                },
+            )
+        ).status_code == 409
+        no_room = await c.post("/api/connections", json={"display_name": "Other"})
+        assert no_room.status_code == 422 and "pick at least one room" in no_room.text
         secret = (await c.post("/api/rooms", json={"name": "Private"})).json()
 
         async with mcp(sim_srv, token) as client:
@@ -187,6 +200,7 @@ async def test_review_with_grok_bot_over_mcp(fresh_database_url: str, tmp_path: 
                     tasks = await call(client, "get_tasks")
                     assert len(tasks) == 1 and tasks[0]["run_id"] == run["id"] and tasks[0]["step"] == "share"
                     assert "Meme coin strategy research" in tasks[0]["instruction"]
+                    assert "never suggest, instruct or perform real trades" in tasks[0]["instruction"]
                     done = await call(client, "submit_task", run_id=run["id"], text=report)
                     assert done["ok"] is True
                     with pytest.raises(RuntimeError, match="No task"):
@@ -225,8 +239,13 @@ async def test_review_with_grok_bot_over_mcp(fresh_database_url: str, tmp_path: 
                 prompt = analyze["messages"][-1]["content"]
                 assert "H112 wallet basket" in prompt and "detail line" in prompt
                 assert '"type": "external"' in prompt, "Grok Bot's text is labeled as external"
-                assert "never instruct real trades" in json.dumps(
-                    [q["body"] for q in calls["requests"] if q["provider"] == "anthropic"][-1]
+                rule = "never suggest, instruct or perform real trades"
+                reviewer_calls = [
+                    q["body"] for q in calls["requests"] if q["provider"] in ("anthropic", "openai")
+                ]
+                assert len(reviewer_calls) == 3
+                assert all(rule in json.dumps(b) for b in reviewer_calls), (
+                    "every reviewer step carries the rule"
                 )
 
 
@@ -312,3 +331,142 @@ def test_split_text() -> None:
     assert parts[0].startswith("[Part 1 of 4]\n") and parts[-1].startswith("[Part 4 of 4]\n")
     body = "\n".join(p.split("\n", 1)[1] for p in parts)
     assert body.replace("\n", "") == text.replace("\n", ""), "nothing lost"
+
+
+async def raw(srv: Server, method: str, token: str | None, body: Any = None) -> int:
+    headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    async with httpx.AsyncClient(timeout=5) as h:
+        return (await h.request(method, srv.mcp_url, json=body, headers=headers)).status_code
+
+
+async def test_only_post_and_failed_auth_is_throttled(sim_srv: Server) -> None:
+    async with logged_in(sim_srv) as c:
+        token = (await connect(c))["token"]
+    # A GET would open an endless stream; only POST is served.
+    assert await raw(sim_srv, "GET", token) == 405
+    assert await raw(sim_srv, "DELETE", token) == 405
+    assert await raw_post(sim_srv, token) == 200  # Grok Bot is connected and polling
+    # Unknown tokens are throttled across all callers (30 failures a minute) ...
+    codes = [await raw_post(sim_srv, f"ccx_guess{i}") for i in range(35)]
+    assert codes[:30] == [401] * 30 and codes[30:] == [429] * 5
+    # ... while the token in active use keeps working.
+    assert await raw_post(sim_srv, token) == 200
+
+
+async def test_post_limits_and_reply_to_checks(sim_srv: Server) -> None:
+    async with logged_in(sim_srv) as c:
+        conn = await connect(c)
+        other = (await c.post("/api/rooms", json={"name": "Other project"})).json()
+        mine = (
+            await c.post(
+                f"/api/rooms/{other['id']}/messages",
+                json={"kind": "chat", "body": {"text": "owner note"}, "idempotency_key": uuid.uuid4().hex},
+            )
+        ).json()
+    async with mcp(sim_srv, conn["token"]) as client:
+        room = (await call(client, "whoami"))["rooms"][0]["id"]
+        with pytest.raises(RuntimeError, match="1 to 8000"):
+            await call(client, "post_message", room_id=room, text="x" * 8001)
+        with pytest.raises(RuntimeError, match="same room"):
+            await call(client, "post_message", room_id=room, text="hi", reply_to=mine["id"])
+
+
+async def test_concurrent_submissions_cannot_mix(sim_srv: Server) -> None:
+    async with logged_in(sim_srv) as c:
+        room_id, agents = await general_and_agents(c)
+        conn = await connect(c)
+        run = (
+            await c.post(
+                f"/api/rooms/{room_id}/runs",
+                json={
+                    "goal": "g",
+                    "workflow": "review",
+                    "planner_id": agents["Claude"]["id"],
+                    "critic_id": agents["GPT"]["id"],
+                    "builder_id": conn["id"],
+                },
+            )
+        ).json()
+        await wait_status(c, run["id"], {"waiting"})
+        async with mcp(sim_srv, conn["token"]) as a, mcp(sim_srv, conn["token"]) as b:
+            results = await asyncio.gather(
+                call(a, "submit_task", run_id=run["id"], text="A" * 50_000),
+                call(b, "submit_task", run_id=run["id"], text="B" * 50_000),
+                return_exceptions=True,
+            )
+        assert sum(isinstance(x, dict) and x.get("ok") for x in results) == 1
+        assert sum(isinstance(x, Exception) for x in results) == 1
+        await wait_status(c, run["id"], {"waiting", "completed", "failed"})
+        shared = [
+            m
+            for m in await run_messages(c, room_id, run["id"])
+            if m["sender"]["kind"] == "external" and m["body"]["data"].get("step") == "share"
+        ]
+        letters = {m["body"]["text"].split("\n", 1)[1][0] for m in shared}
+        assert len(shared) == 2 and len(letters) == 1, "both parts come from one submission"
+
+
+async def test_timeout_never_fails_a_resumed_run(world: dict[str, Any]) -> None:  # noqa: F811
+    sm = world["sm"]
+    async with sm() as s:
+        ext = models.Principal(id=f"ext_{uuid.uuid4().hex}", kind="external", display_name="Grok Bot")
+        s.add(ext)
+        await s.commit()
+    old = datetime.now(UTC) - timedelta(hours=30)
+    common = dict(
+        kind="review",
+        step="share",
+        planner_id=world["agents"]["Claude"].id,
+        critic_id=world["agents"]["GPT"].id,
+        builder_id=ext.id,
+        agent_id=None,
+    )
+    resumed = await add_run(world, status="queued", waiting_for=None, waiting_since=old, **common)
+    submitting = await add_run(
+        world,
+        status="waiting",
+        waiting_for=ext.id,
+        waiting_since=old,
+        lease_expires_at=datetime.now(UTC) + timedelta(minutes=2),
+        **common,
+    )
+    port = ModelPort(cfg(world["url"]), sm, adapter_factory=lambda p, k: Adapter(), scope="t_wait2")
+    engine = BuiltinEngine(sm, port, world["coordinator"], Decimal("0.25"), simulated=False)
+    assert await engine.expire_waiting(24) == 0
+    async with sm() as s:
+        assert (await s.get(models.Run, resumed.id)).status == "queued"  # type: ignore[union-attr]
+        assert (await s.get(models.Run, submitting.id)).status == "waiting"  # type: ignore[union-attr]
+
+
+async def test_reviewers_see_the_whole_share_despite_chatter(world: dict[str, Any]) -> None:  # noqa: F811
+    from command_center.messaging import service
+    from command_center.orchestrator.context import build_request
+    from command_center.orchestrator.engine import post_parts
+
+    sm = world["sm"]
+    run = await add_run(world)
+    async with sm() as s:
+        ext = models.Principal(id=f"ext_{uuid.uuid4().hex}", kind="external", display_name="Grok Bot")
+        s.add(ext)
+        await s.commit()
+    share = "SUMMARY FIRST\n" + ("evidence line\n" * 4500)  # about 63,000 characters: 2 parts
+    await post_parts(sm, run, ext.id, kind="chat", text=share, key="share:reply", reply_to=None, data={})
+    async with sm() as s:
+        sender = await s.get(models.Principal, ext.id)
+        assert sender is not None
+        for i in range(40):  # chatter after the share
+            await service.append_message(
+                s, world["room"].id, sender, kind="chat", text=f"noise {i}", idempotency_key=f"n{i}xxxxxx"
+            )
+    async with sm() as s:
+        claude = await s.get(models.Principal, world["agents"]["Claude"].id)
+        prof = await s.get(models.AgentProfile, world["agents"]["Claude"].id)
+        assert claude is not None and prof is not None
+        req = await build_request(
+            s, room_id=world["room"].id, agent=claude, profile=prof, instruction="go", run_id=run.id
+        )
+    content = req.messages[0].content
+    assert "SUMMARY FIRST" in content and "[Part 1 of 2]" in content and "[Part 2 of 2]" in content
+    assert content.index("[Part 1 of 2]") < content.index("[Part 2 of 2]"), "parts in order"

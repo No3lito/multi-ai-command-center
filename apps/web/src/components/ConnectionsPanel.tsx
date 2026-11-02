@@ -74,8 +74,8 @@ export function ConnectionsPanel({ api, roomId, roomName, memberIds, onAddToRoom
   function create(e: FormEvent) {
     e.preventDefault();
     const trimmed = name.trim();
-    if (!trimmed || busy) return;
-    void act(() => api.createConnection(trimmed, roomId ? [roomId] : []), true);
+    if (!trimmed || busy || !roomId) return;
+    void act(() => api.createConnection(trimmed, [roomId]), true);
   }
 
   return (
@@ -157,7 +157,7 @@ export function ConnectionsPanel({ api, roomId, roomName, memberIds, onAddToRoom
                     className="underline"
                     onClick={() => void act(() => api.rotateConnection(c.id), true)}
                   >
-                    {c.status === "active" ? "New token" : "Reconnect"}
+                    {c.status === "active" ? "New token (old one stops working)" : "Reconnect"}
                   </button>
                   {c.status === "active" &&
                     (confirming === c.id ? (
@@ -181,6 +181,10 @@ export function ConnectionsPanel({ api, roomId, roomName, memberIds, onAddToRoom
           })}
         </ul>
       )}
+      <p className="mb-1 text-[10px] text-muted">
+        A new connection joins {roomName ? `"${roomName}"` : "the open room"} only. Everything in its rooms is shared
+        with that agent&apos;s provider, so give it a dedicated project room rather than General.
+      </p>
       <form onSubmit={create} className="flex items-end gap-2">
         <div className="min-w-0 flex-1">
           <label htmlFor={nameId} className="mb-0.5 block text-[11px] font-medium text-muted">
@@ -198,7 +202,7 @@ export function ConnectionsPanel({ api, roomId, roomName, memberIds, onAddToRoom
         <button
           type="submit"
           data-testid="connection-create"
-          disabled={busy || !name.trim()}
+          disabled={busy || !name.trim() || !roomId}
           className="rounded-md bg-accent px-3 py-1 text-sm font-medium text-accent-fg disabled:opacity-40"
         >
           Connect
