@@ -11,7 +11,13 @@ Evidence so far:
 - `backend/tests/test_bridge.py`: an official MCP SDK client against the real server. It covers tokens, room scoping, rate limits, rotation and revocation, and a full review run with fake Claude and GPT providers. It also checks cancelling and timeouts.
 - Dashboard tests and a browser test: connect Grok Bot, then a review that waits for it.
 
-**Not yet verified:** the real Grok Bot connection through a Cloudflare tunnel.
+**Verified by the owner (Nov 2, 2026):**
+
+- A named Cloudflare Tunnel (`command-center`, running as a Windows service on the Docker computer) routes `grokbot.multiaicommandcenter.com` to the gateway on port 8001 only.
+- From the internet, `/mcp` answers "only POST is supported" and `/` answers "not found". The dashboard is not reachable.
+- The owner's real Grok Bot added the server and called `whoami`, which returned the name Grok Bot and the room Meme Coin Strategy.
+
+**Next:** the first real Review & improve run with Grok Bot as the worker.
 
 ## Grok agent and design & build workflow (in review, PR #5)
 
