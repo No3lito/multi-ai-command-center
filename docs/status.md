@@ -10,7 +10,7 @@ Branch: `agent/claude/milestone-b`, draft PR #4. Not merged until the owner appr
 
 - **Simulated:** `PROVIDER_MODE=simulated`, deterministic stand-ins, no network, no cost. Proves workflow and UI.
 - **Fake provider:** the full live code path (keys, official Anthropic and OpenAI SDKs, HTTP, cost accounting, spending cap) against a local fake server that imitates both APIs. Proves the plumbing and the money logic, **not** the real APIs.
-- **Real API:** not yet run. Needs the owner's keys; see below.
+- **Real API:** run by the owner on his machine with his own keys (see "Real API verification" below).
 
 ### What works
 
@@ -22,7 +22,7 @@ Branch: `agent/claude/milestone-b`, draft PR #4. Not merged until the owner appr
 | $10 live cap enforced before every paid request: worst-case reservation, run and run-tree budgets, concurrency-safe, true spend recorded | Fake adapter: `test_budget.py`, `test_review_fixes.py` |
 | Missing keys fail loudly; no silent fallback to simulated answers | `test_live_mode_without_keys_fails_loudly` |
 | Usage and cost per provider and model, simulated calls counted separately | `test_coordinator.py`, dashboard Usage panel |
-| `command-center live-check`: one tiny real call per provider through the cap | Fake provider: `test_live_check_command_with_fake_providers`. Real API: pending keys |
+| `command-center live-check`: one tiny real call per provider through the cap | Fake provider: `test_live_check_command_with_fake_providers`. **Real API: verified by the owner** |
 | Durable runs: Postgres lease with heartbeat, survive restarts, cancel stops a whole run tree | `test_review_fixes.py`, `test_cancel_during_model_call` |
 
 Screenshot (simulated): [`docs/screenshots/milestone-b-simulated-run.png`](screenshots/milestone-b-simulated-run.png)
@@ -31,10 +31,27 @@ Screenshot (simulated): [`docs/screenshots/milestone-b-simulated-run.png`](scree
 
 | Suite | Result |
 | --- | --- |
-| Backend: pytest against real PostgreSQL 16, live servers and fake providers | 93 passed |
+| Backend: pytest against real PostgreSQL 16, live servers and fake providers | 95 passed, 3 consecutive runs |
 | Backend: ruff lint and format, mypy strict | clean |
 | Dashboard: Vitest; TypeScript; production build | 78 passed; clean |
 | Browser end-to-end: Playwright in Chrome (simulated mode) | 3 passed |
+
+### Real API verification (Nov 2, 2026, owner's Windows machine, Docker)
+
+| Check | Result |
+| --- | --- |
+| `command-center live-check` | Anthropic `claude-haiku-5-5` and OpenAI `gpt-6-luna` both answered `OK`; $0.000015 recorded against the $10 cap |
+| Real collaboration ("Create a basic login interface", Claude plans, GPT reviews) | Completed with real Claude Sonnet 5.5 and GPT-6.1 Sol answers; the run cost $0.0305. Total real spend so far: $0.0658 of $10 |
+
+The first real run found three problems, now fixed with tests:
+
+| Problem | Fix |
+| --- | --- |
+| A collaboration's @mentions also started reply runs, so Claude answered twice in parallel and agents kept replying after the summary | Only free conversation (reply runs) spawns replies; a collaboration speaks strictly in turn |
+| 1024 output tokens cut Claude's plans off mid-sentence | Default raised to 2048 (migration 0004 moves agents still on 1024); any cut-off answer is now labeled as cut off |
+| The goal was not visible in the room, so agents doubted it came from the owner | Step 1 now names the goal |
+
+A new test also exposed a database deadlock when two runs in one tree reserved and settled at the same moment; lock order is now the same everywhere.
 
 ### Independent security review
 
@@ -110,7 +127,6 @@ Verified by the owner on Windows with Docker Desktop 29.9.2 (WSL 2): `docker com
 
 | For | Item |
 | --- | --- |
-| Milestone B real-API verification | Anthropic and OpenAI API keys, added only to your local `.env` (never pasted into chat or committed). Budget: $10 total, enforced in code before every paid call |
 | Milestone B sign-off | Review PR #4 and approve the merge |
 
 ## Next: Milestone C
