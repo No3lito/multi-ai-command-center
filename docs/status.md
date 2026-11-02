@@ -2,6 +2,17 @@
 
 Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
 
+## Grok Bot bridge (in review, branch `agent/claude/grok-bot-bridge`)
+
+The owner's Grok Bot (xAI's hosted agent app, with its own sub-agents and work) joins the Command Center over MCP. Its first job is a **Review & improve** run: Grok Bot shares its work, Claude and GPT review it and write a plan of fixes and new ideas, and Grok Bot responds. Contract and setup: [`docs/api/bridge.md`](api/bridge.md).
+
+Evidence so far:
+
+- `backend/tests/test_bridge.py`: an official MCP SDK client against the real server. It covers tokens, room scoping, rate limits, rotation and revocation, and a full review run with fake Claude and GPT providers. It also checks cancelling and timeouts.
+- Dashboard tests and a browser test: connect Grok Bot, then a review that waits for it.
+
+**Not yet verified:** the real Grok Bot connection through a Cloudflare tunnel.
+
 ## Grok agent and design & build workflow (in review, PR #5)
 
 Branch: `agent/claude/grok-agent`.
