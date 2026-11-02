@@ -96,7 +96,8 @@ export const MESSAGE_TEXT_MAX = 32000;
 export type AgentProvider = "anthropic" | "openai" | "xai" | "simulated";
 
 /** Whether an agent can run right now. */
-export type AgentStatus = "live" | "simulated" | "missing_key" | "unknown_price" | "disabled";
+export type AgentStatus =
+  "live" | "simulated" | "missing_key" | "unknown_price" | "disabled";
 
 export interface AgentIn {
   display_name: string;
@@ -120,9 +121,16 @@ export interface Agent extends AgentIn {
   price: AgentPrice | null;
 }
 
-export type RunKind = "collab" | "reply";
-export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "budget_exceeded";
-export type RunStep = "plan" | "critique" | "revise" | "summary" | "reply" | "done";
+export type RunKind = "collab" | "reply" | "build";
+export type RunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "budget_exceeded";
+export type RunStep =
+  "plan" | "critique" | "revise" | "summary" | "reply" | "done";
 
 export interface Run {
   id: string;
@@ -133,6 +141,7 @@ export interface Run {
   step: RunStep;
   planner_id: string | null;
   critic_id: string | null;
+  builder_id?: string | null;
   agent_id: string | null;
   root_run_id?: string | null;
   turn_count: number;
@@ -146,10 +155,15 @@ export interface Run {
   finished_at: string | null;
 }
 
+export type RunWorkflow = "collab" | "build";
+
 export interface CreateRunBody {
   goal: string;
+  /** build: planner and critic co-design, builder builds exactly what they specify. */
+  workflow?: RunWorkflow;
   planner_id: string;
   critic_id: string;
+  builder_id?: string;
   budget_usd?: number;
   max_turns?: number;
 }
@@ -179,7 +193,8 @@ export const RUN_BUDGET_MAX = 5;
 export const RUN_MAX_TURNS_DEFAULT = 8;
 
 export const ACTIVE_RUN_STATUSES: readonly RunStatus[] = ["queued", "running"];
-export const isRunActive = (run: Pick<Run, "status">): boolean => ACTIVE_RUN_STATUSES.includes(run.status);
+export const isRunActive = (run: Pick<Run, "status">): boolean =>
+  ACTIVE_RUN_STATUSES.includes(run.status);
 
 /** Agents that can take a turn right now. */
 export const isAgentUsable = (agent: Pick<Agent, "status">): boolean =>

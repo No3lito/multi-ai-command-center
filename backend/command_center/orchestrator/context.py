@@ -13,6 +13,10 @@ from command_center.providers.base import ChatMessage, ChatRequest
 MAX_MESSAGES = 30
 MAX_MESSAGE_CHARS = 4_000
 MAX_TRANSCRIPT_CHARS = 24_000
+# Messages of the run being executed (a design, the code built from it) are kept far more
+# completely, so a builder sees the whole design and a checker sees the whole build.
+MAX_RUN_MESSAGE_CHARS = 40_000
+MAX_RUN_TRANSCRIPT_CHARS = 80_000
 
 PREAMBLE = (
     "You are {name}, an AI agent with the role '{role}' in the Multi-AI Command Center: a shared "
@@ -34,6 +38,7 @@ async def build_request(
     agent: models.Principal,
     profile: models.AgentProfile,
     instruction: str,
+    run_id: str | None = None,
 ) -> ChatRequest:
     rows = (
         await session.execute(
@@ -46,20 +51,28 @@ async def build_request(
     ).all()
     lines: list[str] = []
     total = 0
+    run_total = 0
     for msg, sender in rows:  # newest first; stop when the budget of characters is used
+        in_run = run_id is not None and msg.correlation_id == run_id
+        limit = MAX_RUN_MESSAGE_CHARS if in_run else MAX_MESSAGE_CHARS
         body = msg.body_text
-        if len(body) > MAX_MESSAGE_CHARS:
-            body = body[:MAX_MESSAGE_CHARS] + " [truncated]"
+        if len(body) > limit:
+            body = body[:limit] + " [truncated]"
         who = "you" if sender.id == agent.id else sender.kind
         # JSON escapes newlines and quotes, so message text cannot forge another speaker's line.
         line = json.dumps(
             {"from": sender.display_name, "type": who, "kind": msg.kind, "text": body},
             ensure_ascii=False,
         )
-        if total + len(line) > MAX_TRANSCRIPT_CHARS:
-            break
+        if in_run:
+            if run_total + len(line) > MAX_RUN_TRANSCRIPT_CHARS:
+                break
+            run_total += len(line)
+        else:
+            if total + len(line) > MAX_TRANSCRIPT_CHARS:
+                break
+            total += len(line)
         lines.append(line)
-        total += len(line)
     transcript = "\n".join(reversed(lines)) or "(no messages yet)"
     system = PREAMBLE.format(name=agent.display_name, role=profile.role)
     if profile.system_prompt.strip():

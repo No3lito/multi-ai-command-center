@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
@@ -30,6 +31,13 @@ MAX_REPLY_HOPS = 3
 MAX_MENTIONS_PER_MESSAGE = 5
 DEFAULT_MAX_RUNS_PER_TREE = 10
 COLLAB_STEPS = ("plan", "critique", "revise", "summary")
+# Design & build: two co-designers with one goal direct a builder. The builder adds a short
+# build note, implements the final design exactly (including any code-level instructions),
+# and applies the co-designer's fix instructions if the check finds problems.
+BUILD_STEPS = ("design", "codesign", "feasibility", "finalize", "build", "check", "fix", "summary")
+APPROVED = "APPROVED"
+FEASIBILITY_MAX_TOKENS = 400
+BUILD_MAX_TOKENS = 8192
 FINISHED = {"completed", "failed", "cancelled", "budget_exceeded"}
 
 
@@ -43,9 +51,14 @@ class OrchestrationEngine(Protocol):
         ...
 
 
-def next_step(step: str) -> str:
-    i = COLLAB_STEPS.index(step)
-    return COLLAB_STEPS[i + 1] if i + 1 < len(COLLAB_STEPS) else "done"
+def steps_for(kind: str) -> tuple[str, ...]:
+    return BUILD_STEPS if kind == "build" else COLLAB_STEPS
+
+
+def next_step(step: str, kind: str = "collab") -> str:
+    steps = steps_for(kind)
+    i = steps.index(step)
+    return steps[i + 1] if i + 1 < len(steps) else "done"
 
 
 def find_mentions(text: str, agents: list[models.Principal]) -> list[models.Principal]:
@@ -233,7 +246,13 @@ class BuiltinEngine:
     # ------------------------------------------------------------ agent turn
 
     async def _agent_turn(
-        self, run: models.Run, agent_id: str, instruction: str, step_key: str, reply_to: str | None
+        self,
+        run: models.Run,
+        agent_id: str,
+        instruction: str,
+        step_key: str,
+        reply_to: str | None,
+        max_output_tokens: int | None = None,
     ) -> str | None:
         """One model call plus the agent's message. Returns the message id, or None if the run ended."""
         async with self.sessionmaker() as s:
@@ -259,8 +278,10 @@ class BuiltinEngine:
                 await self._fail(run, "failed", "Agent no longer exists.")
                 return None
             req = await build_request(
-                s, room_id=run.room_id, agent=agent, profile=profile, instruction=instruction
+                s, room_id=run.room_id, agent=agent, profile=profile, instruction=instruction, run_id=run.id
             )
+            if max_output_tokens is not None:
+                req = replace(req, max_output_tokens=max_output_tokens)
             name = agent.display_name
         try:
             result = await self.models.call(profile, req, run_id=run.id, simulated=run.simulated)
@@ -281,8 +302,7 @@ class BuiltinEngine:
         text = result.response.text.strip() or "(empty response)"
         if result.response.truncated:
             text += (
-                f"\n\n[Cut off: this answer reached {name}'s output limit of "
-                f"{profile.max_output_tokens} tokens.]"
+                f"\n\n[Cut off: this answer reached {name}'s output limit of {req.max_output_tokens} tokens.]"
             )
         async with self.sessionmaker() as s:
             mentioned = [
@@ -338,6 +358,8 @@ class BuiltinEngine:
             return False
         if run.kind == "reply":
             return await self._reply_step(run)
+        if run.kind == "build":
+            return await self._build_step(run)
         return await self._collab_step(run)
 
     async def _reply_step(self, run: models.Run) -> bool:
@@ -419,3 +441,141 @@ class BuiltinEngine:
             )
             await self._update(run.id, status="completed", step="done")
         return False
+
+    async def _build_step(self, run: models.Run) -> bool:
+        assert run.planner_id is not None and run.critic_id is not None and run.builder_id is not None
+        async with self.sessionmaker() as s:
+            designer = await s.get(models.Principal, run.planner_id)
+            codesigner = await s.get(models.Principal, run.critic_id)
+            builder = await s.get(models.Principal, run.builder_id)
+        if designer is None or codesigner is None or builder is None:
+            await self._fail(run, "failed", "A participating agent no longer exists.")
+            return False
+        p, c, b = designer.display_name, codesigner.display_name, builder.display_name
+        shared = (
+            f"You and {c if run.step != 'codesign' else p} are co-designers with the same goal: give "
+            f"the owner exactly what they need for: {run.goal}."
+        )
+        plans: dict[str, tuple[str, str, str, int | None]] = {
+            "design": (
+                run.planner_id,
+                f"Step 1 of 7: @{p}, draft the design for: {run.goal}",
+                f"{shared} Draft the design: what will be built, its structure and files, the key "
+                f"decisions, and how to check that it works. {b} will build exactly what the final "
+                "design says, including any code-level instructions (language, libraries, names, "
+                "patterns), so be specific wherever it matters.",
+                None,
+            ),
+            "codesign": (
+                run.critic_id,
+                f"Step 2 of 7: @{c}, improve the design together with @{p}.",
+                f"{shared} Improve {p}'s draft as an equal partner: fix gaps and risks, simplify, "
+                "and add what is missing, including code-level instructions where they matter. "
+                "Say clearly what you changed and why. Do not write the implementation.",
+                None,
+            ),
+            "feasibility": (
+                run.builder_id,
+                f"Step 3 of 7: @{b}, quick build check.",
+                f"You will build this design exactly as {p} and {c} direct. In under 120 words, "
+                "note only what would block or complicate building it, or say it is ready to "
+                "build. This is minor input: do not redesign it and do not write code.",
+                FEASIBILITY_MAX_TOKENS,
+            ),
+            "finalize": (
+                run.planner_id,
+                f"Step 4 of 7: @{p}, finalize the design with @{c}'s improvements and @{b}'s note.",
+                f"{shared} Write the final design that you and {c} agree on, folding in {c}'s "
+                f"improvements and {b}'s build note. This is the specification {b} will build "
+                "from: complete and concrete, with no open questions unless they truly block.",
+                None,
+            ),
+            "build": (
+                run.builder_id,
+                f"Step 5 of 7: @{b}, build it exactly as designed.",
+                f"Build the final design above exactly as {p} and {c} specified, including every "
+                "code-level instruction (language, libraries, names, structure). Do not substitute "
+                "your own choices. Output the complete implementation: every file with its path "
+                "as a heading and its full contents in a code block, then a short instruction for "
+                "running it. Only if something in the design truly cannot work, follow it as "
+                "closely as possible and say where in one line.",
+                BUILD_MAX_TOKENS,
+            ),
+            "check": (
+                run.critic_id,
+                f"Step 6 of 7: @{c}, check the build against the design.",
+                f"Check {b}'s build against the final design. If it matches and works, reply "
+                f"with {APPROVED} as the first word and nothing that needs changing. Otherwise "
+                f"give {b} numbered fix instructions, most important first, precise enough to "
+                "apply without guessing (file, what to change, what it should be). Do not "
+                "rewrite the code yourself.",
+                None,
+            ),
+            "fix": (
+                run.builder_id,
+                f"Step 7 of 7: @{b}, apply @{c}'s fix instructions.",
+                f"Apply {c}'s numbered fix instructions above exactly, and change nothing else. "
+                "Output every changed file in full, with its path as a heading and its contents "
+                "in a code block, then one line per instruction saying how it was applied.",
+                BUILD_MAX_TOKENS,
+            ),
+        }
+        if run.step == "fix" and await self._approved(run):
+            await self._update(run.id, step="summary")
+            run.step = "summary"
+        if run.step in plans:
+            agent_id, announce, instruction, limit = plans[run.step]
+            assign_id = await self._post(
+                run,
+                self.coordinator_id,
+                kind="task.assign",
+                text=announce,
+                key=f"{run.step}:assign",
+                reply_to=run.last_message_id,
+                data={"run_id": run.id, "status": "running", "step": run.step},
+            )
+            msg_id = await self._agent_turn(run, agent_id, instruction, run.step, assign_id, limit)
+            if msg_id is None:
+                return False
+            await self._update(run.id, step=next_step(run.step, "build"))
+            return True
+        if run.step == "summary":
+            fresh = await self._load(run.id)
+            spent = fresh.spent_usd if fresh else run.spent_usd
+            label = "simulated, no API cost" if run.simulated else f"real API cost ${spent:.4f}"
+            fixed = not await self._approved(run)
+            where = (
+                f"The code is in {b}'s step 5 message, with the changed files in step 7."
+                if fixed
+                else f"{c} approved the build; the code is in {b}'s step 5 message."
+            )
+            text = (
+                f"Run complete. {p} and {c} designed it and {b} built it for: {run.goal}. "
+                f"{where} {run.turn_count} agent turns, {label}."
+            )
+            await self._post(
+                run,
+                self.coordinator_id,
+                kind="task.result",
+                text=text,
+                key="summary",
+                reply_to=run.last_message_id,
+                data={"run_id": run.id, "status": "completed"},
+            )
+            await self._update(run.id, status="completed", step="done")
+        return False
+
+    async def _approved(self, run: models.Run) -> bool:
+        """True when the co-designer's check message starts with APPROVED."""
+        assert run.critic_id is not None
+        async with self.sessionmaker() as s:
+            body = await s.scalar(
+                select(models.Message.body_text).where(
+                    models.Message.sender_id == run.critic_id,
+                    models.Message.idempotency_key == f"{run.id}:check:reply",
+                )
+            )
+        if body is None:
+            return False
+        first = body.lstrip(" *_#`>").split(None, 1)
+        return bool(first) and first[0].strip(".,:;!*_").upper() == APPROVED

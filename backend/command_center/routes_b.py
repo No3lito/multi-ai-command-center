@@ -33,16 +33,22 @@ DEFAULT_REPLY_BUDGET = Decimal("0.25")  # per reply run
 REPLY_TREE_BUDGET = Decimal("0.50")  # shared by every run triggered from one human message
 
 CLAUDE_PROMPT = (
-    "You lead planning. Turn goals into clear, ordered, testable steps, and say what you would "
-    "verify. When reviewing others, be specific and kind."
+    "You are a co-designer. You and your fellow designer share one goal: give the owner exactly "
+    "what they need. Turn goals into clear, concrete, buildable designs and say how to verify "
+    "them. When a builder implements your design, give precise instructions, down to the code "
+    "where it matters."
 )
 GROK_PROMPT = (
-    "You are the independent second opinion. Challenge assumptions, look for what the others "
-    "missed, and say plainly when you disagree. When asked to plan, keep it short and concrete."
+    "You are the builder. The co-designers (Claude and GPT) direct the work, and you follow "
+    "their design and instructions exactly, including code-level choices. Write complete, "
+    "working code. Your own input is minor: briefly flag only what would block or complicate "
+    "the build."
 )
 GPT_PROMPT = (
-    "You lead review. Find gaps, risks and simpler alternatives, and suggest concrete fixes. "
-    "When asked to plan, keep plans short and practical."
+    "You are a co-designer. You and your fellow designer share one goal: give the owner exactly "
+    "what they need. As an equal partner, find gaps, risks and simpler options and fold them "
+    "into the design. When a builder implements it, check the result and give precise fix "
+    "instructions."
 )
 
 
@@ -66,8 +72,8 @@ async def seed(db: Database, settings: Settings) -> str:
         defaults: list[tuple[str, str, str, str, str]] = []
         if has_agents is None:
             defaults += [
-                ("Claude", "Planner", "anthropic", settings.default_claude_model, CLAUDE_PROMPT),
-                ("GPT", "Reviewer", "openai", settings.default_openai_model, GPT_PROMPT),
+                ("Claude", "Co-designer", "anthropic", settings.default_claude_model, CLAUDE_PROMPT),
+                ("GPT", "Co-designer", "openai", settings.default_openai_model, GPT_PROMPT),
             ]
         # Grok arrived after the first agents, so existing installs get it once, too.
         has_grok = await s.scalar(
@@ -77,7 +83,7 @@ async def seed(db: Database, settings: Settings) -> str:
             select(models.Principal.id).where(func.lower(models.Principal.display_name) == "grok").limit(1)
         )
         if has_grok is None and grok_name_taken is None:
-            defaults.append(("Grok", "Challenger", "xai", settings.default_grok_model, GROK_PROMPT))
+            defaults.append(("Grok", "Builder", "xai", settings.default_grok_model, GROK_PROMPT))
         for name, role, provider, model, prompt in defaults:
             agent = models.Principal(id=new_id("agt"), kind="agent", display_name=name)
             s.add(agent)
@@ -127,6 +133,7 @@ def run_out(r: models.Run) -> RunOut:
         step=r.step,
         planner_id=r.planner_id,
         critic_id=r.critic_id,
+        builder_id=r.builder_id,
         agent_id=r.agent_id,
         root_run_id=r.root_run_id,
         turn_count=r.turn_count,
@@ -264,10 +271,18 @@ def register(
         room_id: str, body: RunCreateIn, request: Request, principal: PrincipalDep, session: SessionDep
     ) -> RunOut:
         await member_room(session, room_id, principal)
-        if body.planner_id == body.critic_id:
-            raise api_error(422, "validation_error", "Planner and critic must be different agents")
+        build = body.workflow == "build"
+        roles = [("planner", body.planner_id), ("critic", body.critic_id)]
+        if build:
+            if body.builder_id is None:
+                raise api_error(422, "validation_error", "builder_id is required for the build workflow")
+            roles.append(("builder", body.builder_id))
+        elif body.builder_id is not None:
+            raise api_error(422, "validation_error", "builder_id is only used by the build workflow")
+        if len({agent_id for _, agent_id in roles}) != len(roles):
+            raise api_error(422, "validation_error", "Each role needs a different agent")
         agents = {a.id for a in await room_agents(session, room_id)}
-        for role, agent_id in (("planner", body.planner_id), ("critic", body.critic_id)):
+        for role, agent_id in roles:
             if agent_id not in agents:
                 raise api_error(422, "validation_error", f"{role}_id: not an enabled agent in this room")
         run_id = new_id("run")
@@ -275,13 +290,15 @@ def register(
             id=run_id,
             root_run_id=run_id,  # a collaboration is the root of its own run tree
             room_id=room_id,
-            kind="collab",
+            kind="build" if build else "collab",
             status="queued",
-            step="plan",
+            step="design" if build else "plan",
             goal=body.goal.strip(),
             planner_id=body.planner_id,
             critic_id=body.critic_id,
-            max_turns=body.max_turns,
+            builder_id=body.builder_id,
+            # A build run needs up to 7 agent turns.
+            max_turns=max(body.max_turns, 7) if build else body.max_turns,
             budget_usd=Decimal(str(body.budget_usd)),
             spent_usd=Decimal(0),
             simulated=settings.provider_mode == "simulated",

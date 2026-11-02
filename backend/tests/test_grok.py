@@ -36,7 +36,7 @@ async def test_grok_reviews_a_plan_through_the_live_code_path(
                 grok = agents["Grok"]
                 assert (grok["provider"], grok["model"], grok["status"]) == (
                     "xai",
-                    "grok-4.20-0309-non-reasoning",
+                    "grok-build-0.1",
                     "live",
                 )
                 assert agents["GPT"]["status"] == "missing_key", "no OpenAI key in this test"
@@ -56,8 +56,8 @@ async def test_grok_reviews_a_plan_through_the_live_code_path(
                 xai_body = next(q["body"] for q in calls["requests"] if q["provider"] == "xai")
                 assert xai_body["input"][0]["role"] == "system" and xai_body["store"] is False
                 # Claude: 2 x (100 in, 50 out) at $2/$10 = $0.0014.
-                # Grok: 100 in, 50 out + 20 reasoning at $1.25/$2.50 per 1M = $0.0003.
-                assert done["spent_usd"] == pytest.approx(0.0014 + 0.0003)
+                # Grok (grok-build-0.1): 100 in, 50 out + 20 reasoning at $1/$2 per 1M = $0.00024.
+                assert done["spent_usd"] == pytest.approx(0.0014 + 0.00024)
                 chats = [m for m in await run_messages(c, room_id, done["id"]) if m["kind"] == "chat"]
                 assert [m["sender"]["display_name"] for m in chats] == ["Claude", "Grok", "Claude"]
                 assert chats[1]["body"]["data"]["provider"] == "xai"

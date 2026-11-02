@@ -185,8 +185,12 @@ class MemberIn(Strict):
 
 class RunCreateIn(Strict):
     goal: str = Field(min_length=1, max_length=4000)
+    # collab: planner plans, critic reviews, planner revises.
+    # build: planner and critic co-design, builder builds exactly what they specify.
+    workflow: Literal["collab", "build"] = "collab"
     planner_id: str = Field(pattern=PRINCIPAL_ID)
     critic_id: str = Field(pattern=PRINCIPAL_ID)
+    builder_id: str | None = Field(default=None, pattern=PRINCIPAL_ID)
     budget_usd: float = Field(default=0.50, gt=0, le=5.0)
     max_turns: int = Field(default=8, ge=3, le=20)
 
@@ -194,12 +198,13 @@ class RunCreateIn(Strict):
 class RunOut(Strict):
     id: str
     room_id: str
-    kind: Literal["collab", "reply"]
+    kind: Literal["collab", "reply", "build"]
     status: RunStatus
     goal: str
     step: str
     planner_id: str | None
     critic_id: str | None
+    builder_id: str | None = None
     agent_id: str | None
     root_run_id: str | None = None
     turn_count: int

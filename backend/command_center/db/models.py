@@ -153,6 +153,8 @@ class Run(Base):
     goal: Mapped[str] = mapped_column(Text)
     planner_id: Mapped[str | None] = mapped_column(ForeignKey("principals.id"), nullable=True)
     critic_id: Mapped[str | None] = mapped_column(ForeignKey("principals.id"), nullable=True)
+    # Design & build runs: planner_id and critic_id are the two co-designers; builder_id builds.
+    builder_id: Mapped[str | None] = mapped_column(ForeignKey("principals.id"), nullable=True)
     agent_id: Mapped[str | None] = mapped_column(ForeignKey("principals.id"), nullable=True)
     # Every run belongs to a tree started by one human action. Limits and budget apply per tree.
     root_run_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
@@ -174,7 +176,7 @@ class Run(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        CheckConstraint("kind in ('collab','reply')", name="run_kind"),
+        CheckConstraint("kind in ('collab','reply','build')", name="run_kind"),
         CheckConstraint(
             "status in ('queued','running','completed','failed','cancelled','budget_exceeded')",
             name="run_status",

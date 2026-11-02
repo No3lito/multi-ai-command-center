@@ -9,6 +9,7 @@ Extends [Milestone A](milestone-a.md); everything there still applies (auth, CSR
 - **Run:** one unit of coordinated work in a room. Two kinds:
   - `reply`: a single agent turn, created automatically when a chat message mentions an agent.
   - `collab`: the plan, critique, revise, summarize workflow between two agents.
+  - `build`: design & build. Two co-designers with one goal (the owner gets exactly what they need) direct a builder, who follows their design exactly, including code-level instructions.
 - **Provider mode** (`PROVIDER_MODE` setting):
   - `live` (default): agents call the real Anthropic, OpenAI or xAI API. A missing key makes the turn fail with a clear error message in the room. There is never a silent fallback.
   - `simulated`: every agent uses a deterministic local stand-in that costs nothing. Every simulated message carries `body.data.simulated = true` and the dashboard labels it **SIMULATED**.
@@ -66,6 +67,8 @@ Agent and coordinator messages use the existing envelope:
 
 `budget_usd` defaults to `0.50` (maximum `5.00`), and `max_turns` defaults to `8` (maximum `20`). Planner and critic must be different agents and members of the room.
 
+For design & build, send `"workflow": "build"` and a `builder_id`: `planner_id` is the designer, `critic_id` the co-designer and `builder_id` the builder, all different enabled agents in the room. A build run gets at least 7 turns.
+
 `Run`:
 
 ```json
@@ -87,6 +90,23 @@ Agent and coordinator messages use the existing envelope:
 `plan` (planner) → `critique` (critic) → `revise` (planner) → `summary` (coordinator, no model call) → `done`.
 
 The coordinator posts a `task.assign` message before each agent step and a `task.result` summary at the end. Each step's message replies to the previous one. A step that fails (provider error, budget) ends the run with `failed` or `budget_exceeded` and an `error` message in the room. Approval gates arrive in Milestone C.
+
+### Design & build workflow (`kind: "build"`)
+
+| Step | Agent | What it does | Output limit |
+| --- | --- | --- | --- |
+| `design` | designer | Drafts the design: what, structure and files, key decisions, how to verify; code-level instructions where they matter | agent's own |
+| `codesign` | co-designer | Improves it as an equal partner; says what changed and why | agent's own |
+| `feasibility` | builder | Minor input: under 120 words on what would block the build, or "ready" | 400 tokens |
+| `finalize` | designer | The final specification both designers agree on | agent's own |
+| `build` | builder | Implements the final design exactly: every file in full, then how to run it | 8,192 tokens |
+| `check` | co-designer | `APPROVED` as the first word, or numbered fix instructions | agent's own |
+| `fix` | builder | Skipped when approved; otherwise applies the instructions exactly and outputs changed files | 8,192 tokens |
+| `summary` | coordinator | Says where the code is and the real cost | none |
+
+Messages of the run itself are kept nearly whole in each agent's context (up to 40,000 characters each, 80,000 in total), so the builder sees the whole design and the checker sees the whole build. Older room messages keep the usual limits.
+
+For now the builder writes code into the room. Saving files and running code need the execution sandbox and approval gates (Milestone C and later).
 
 ### Mention routing
 

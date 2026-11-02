@@ -58,9 +58,9 @@ class Settings(BaseSettings):
     max_runs_per_tree: int = Field(default=10, ge=1, le=100)
     default_claude_model: str = "claude-sonnet-5-5"
     default_openai_model: str = "gpt-6.1-sol"
-    # A non-reasoning Grok model by default: its cost is bounded by max_output_tokens, which
-    # xAI does not document as covering reasoning tokens. Switch an agent to grok-4.7 at will.
-    default_grok_model: str = "grok-4.20-0309-non-reasoning"
+    # Grok is the builder: xAI's coding model by default (cheapest Grok text model, $1/$2 per
+    # 1M). Switch the agent to grok-4.7 at will (a reasoning model, so less predictable cost).
+    default_grok_model: str = "grok-build-0.1"
     log_level: str = "INFO"
 
     @field_validator("owner_password")

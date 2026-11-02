@@ -47,6 +47,7 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
 
   // Start a collab run: planner Claude, critic GPT, default budget.
   await page.getByTestId("collab-goal").fill("Create a basic login interface");
+  await page.getByTestId("collab-workflow").selectOption("collab");
   await page.getByTestId("collab-planner").selectOption({ label: "Claude" });
   await page.getByTestId("collab-critic").selectOption({ label: "GPT" });
   await expect(page.getByTestId("collab-budget")).toHaveValue("0.50");
@@ -124,4 +125,38 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
     { timeout: 30_000 },
   );
   await expect(usagePanel.getByTestId("usage-spent")).toHaveText("$0.00");
+});
+
+test("simulated design & build: Claude and GPT design, Grok builds and applies fixes", async ({ page }) => {
+  test.setTimeout(120_000);
+  await signIn(page);
+  await openRoom(page, "General");
+  for (const name of ["Claude", "GPT", "Grok"]) {
+    await expect(roomAgent(page, name)).toHaveCount(1, { timeout: 10_000 });
+  }
+
+  // With three usable agents the form opens on design & build with the seeded roles.
+  await expect(page.getByTestId("collab-workflow")).toHaveValue("build");
+  await expect(page.getByTestId("collab-builder").locator("option:checked")).toHaveText("Grok");
+  await page.getByTestId("collab-goal").fill("A tip calculator web page");
+  await page.getByTestId("collab-start").click();
+
+  const firstRun = page.getByTestId("run-item").first();
+  await expect(firstRun).toContainText("A tip calculator web page", { timeout: 10_000 });
+  await expect(firstRun).toContainText("Claude and GPT design, Grok builds");
+  const runId = await firstRun.getAttribute("data-run-id");
+  const runItem = page.locator(`[data-testid="run-item"][data-run-id="${runId}"]`);
+  await expect(runItem).toHaveAttribute("data-status", "completed", { timeout: 60_000 });
+
+  // Simulated answers never say APPROVED, so all 7 steps run, in this order.
+  const agentMsgs = messages(page, { senderKind: "agent", correlationId: runId! });
+  await expect(agentMsgs).toHaveCount(7, { timeout: 10_000 });
+  const order = ["Claude", "GPT", "Grok", "Claude", "Grok", "GPT", "Grok"];
+  for (let i = 0; i < order.length; i += 1) {
+    await expect(agentMsgs.nth(i)).toContainText(order[i]);
+    await expect(agentMsgs.nth(i).getByTestId("simulated-badge")).toHaveText("SIMULATED");
+  }
+  const notes = messages(page, { senderKind: "system", correlationId: runId! });
+  await expect(notes.and(page.locator('[data-note-kind="task.result"]'))).toHaveCount(1);
+  await expect(notes.first()).toContainText("Step 1 of 7: @Claude, draft the design for: A tip calculator web page");
 });
