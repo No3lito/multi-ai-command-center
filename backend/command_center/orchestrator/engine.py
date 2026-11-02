@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from command_center.db import models
@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 
 MAX_REPLY_HOPS = 3
 MAX_MENTIONS_PER_MESSAGE = 5
+DEFAULT_MAX_RUNS_PER_TREE = 10
 COLLAB_STEPS = ("plan", "critique", "revise", "summary")
 FINISHED = {"completed", "failed", "cancelled", "budget_exceeded"}
 
@@ -82,17 +83,48 @@ async def create_reply_runs(
     hop: int,
     budget_usd: Decimal,
     simulated: bool,
+    root_run_id: str | None = None,
+    tree_budget_usd: Decimal | None = None,
+    max_runs_per_tree: int = DEFAULT_MAX_RUNS_PER_TREE,
 ) -> list[models.Run]:
-    """One reply run per mentioned agent that is an enabled member of the room."""
+    """One reply run per mentioned agent that is an enabled member of the room.
+
+    Every run belongs to a tree. root_run_id=None starts a new tree (a human message): the
+    first run is the root and carries the tree budget, its siblings join it. Agent-triggered
+    runs pass their parent's root. A tree never grows past max_runs_per_tree runs, and all of
+    its runs share the root's budget (enforced by ModelPort before each paid call).
+    """
     if hop > MAX_REPLY_HOPS:
         return []
     members = {a.id: a for a in await room_agents(session, room_id)}
+    wanted = [a for a in list(dict.fromkeys(agent_ids))[:MAX_MENTIONS_PER_MESSAGE] if a in members]
+    room_left = max_runs_per_tree
+    if root_run_id is not None:
+        root = await session.scalar(select(models.Run).where(models.Run.id == root_run_id).with_for_update())
+        if root is None or root.status not in ("queued", "running", "completed"):
+            await session.commit()
+            return []  # tree cancelled or failed: no new branches
+        in_tree = await session.scalar(
+            select(func.count())
+            .select_from(models.Run)
+            .where((models.Run.root_run_id == root_run_id) | (models.Run.id == root_run_id))
+        )
+        room_left = max_runs_per_tree - int(in_tree or 0)
+        if room_left < len(wanted):
+            log.info(
+                "run tree %s reached %d runs; dropping %d mentions",
+                root_run_id,
+                max_runs_per_tree,
+                len(wanted) - max(room_left, 0),
+            )
     runs: list[models.Run] = []
-    for agent_id in list(dict.fromkeys(agent_ids))[:MAX_MENTIONS_PER_MESSAGE]:
-        if agent_id not in members:
-            continue
+    for agent_id in wanted[: max(room_left, 0)]:
+        run_id = new_id("run")
+        new_root = root_run_id or (runs[0].id if runs else run_id)
+        is_root = new_root == run_id
         run = models.Run(
-            id=new_id("run"),
+            id=run_id,
+            root_run_id=new_root,
             room_id=room_id,
             kind="reply",
             status="queued",
@@ -103,7 +135,7 @@ async def create_reply_runs(
             last_message_id=trigger_id,
             hop=hop,
             max_turns=1,
-            budget_usd=budget_usd,
+            budget_usd=(tree_budget_usd or budget_usd) if is_root else budget_usd,
             spent_usd=Decimal(0),
             simulated=simulated,
             created_by=created_by,
@@ -124,7 +156,9 @@ class BuiltinEngine:
         coordinator_id: str,
         reply_budget_usd: Decimal,
         simulated: bool,
+        max_runs_per_tree: int = DEFAULT_MAX_RUNS_PER_TREE,
     ) -> None:
+        self.max_runs_per_tree = max_runs_per_tree
         self.sessionmaker = sessionmaker
         self.models = models_port
         self.coordinator_id = coordinator_id
@@ -170,8 +204,12 @@ class BuiltinEngine:
 
     async def _update(self, run_id: str, **values: object) -> None:
         async with self.sessionmaker() as s:
-            run = await s.get(models.Run, run_id)
+            run = await s.get(models.Run, run_id, with_for_update=True)
             if run is None:
+                return
+            if run.status in FINISHED:
+                # Already ended (for example cancelled by the owner while a step ran): never
+                # resurrect it or overwrite its final status.
                 return
             for key, value in values.items():
                 setattr(run, key, value)
@@ -198,6 +236,19 @@ class BuiltinEngine:
         self, run: models.Run, agent_id: str, instruction: str, step_key: str, reply_to: str | None
     ) -> str | None:
         """One model call plus the agent's message. Returns the message id, or None if the run ended."""
+        async with self.sessionmaker() as s:
+            # A previous attempt of this exact step may have posted its answer and then crashed
+            # before the run advanced. Reuse it instead of paying for the same call again.
+            existing = await s.scalar(
+                select(models.Message.id).where(
+                    models.Message.sender_id == agent_id,
+                    models.Message.idempotency_key == f"{run.id}:{step_key}:reply",
+                )
+            )
+        if existing is not None:
+            log.info("run %s step %s already answered; not calling the model again", run.id, step_key)
+            await self._update(run.id, last_message_id=existing)
+            return existing
         if run.turn_count >= run.max_turns:
             await self._fail(run, "failed", f"Turn limit reached ({run.max_turns}).")
             return None
@@ -267,6 +318,8 @@ class BuiltinEngine:
                     hop=run.hop + 1,
                     budget_usd=self.reply_budget_usd,
                     simulated=run.simulated,
+                    root_run_id=run.root_run_id or run.id,
+                    max_runs_per_tree=self.max_runs_per_tree,
                 )
         return msg_id
 

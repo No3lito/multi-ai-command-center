@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass
 from decimal import ROUND_UP, Decimal
 from functools import lru_cache
@@ -13,9 +12,10 @@ PRICES_FILE = Path(__file__).with_name("prices.json")
 MTOK = Decimal(1_000_000)
 MICRO = Decimal("0.000001")
 
-# Conservative token estimate for budgeting before a call: ~2.5 characters per token
-# overestimates typical English (about 4), so reservations err high.
-CHARS_PER_TOKEN_ESTIMATE = 2.5
+# Conservative token estimate for budgeting before a call: one token per UTF-8 byte. Real
+# tokenizers average about 4 bytes per token for English and never less than 1 byte, so the
+# reservation is an upper bound even for emoji or non-Latin text (where chars/N estimates fail).
+# Overhead covers message framing and role tokens.
 PROMPT_OVERHEAD_TOKENS = 64
 
 
@@ -55,5 +55,5 @@ def price_for(provider: str, model: str) -> Price | None:
     return price_table().get(f"{provider}:{model}")
 
 
-def estimate_input_tokens(prompt_chars: int) -> int:
-    return math.ceil(prompt_chars / CHARS_PER_TOKEN_ESTIMATE) + PROMPT_OVERHEAD_TOKENS
+def estimate_input_tokens(prompt_bytes: int) -> int:
+    return prompt_bytes + PROMPT_OVERHEAD_TOKENS

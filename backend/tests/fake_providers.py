@@ -4,7 +4,7 @@ The app is pointed at this server with ANTHROPIC_BASE_URL / OPENAI_BASE_URL, so 
 live code path (keys, official SDKs, HTTP, cost accounting, spending cap) runs end to end
 without spending money. Every response is fabricated and says so.
 
-Run: python -m tests.fake_providers --port N [--delay SECONDS]
+Run: python -m tests.fake_providers --port N [--delay SECONDS] [--reply-suffix TEXT]
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-STATE: dict[str, object] = {"anthropic": 0, "openai": 0, "delay": 0.0, "models": []}
+STATE: dict[str, object] = {"anthropic": 0, "openai": 0, "delay": 0.0, "models": [], "suffix": ""}
 FAKE_IN, FAKE_OUT = 100, 50  # fixed token usage per call, so expected cost is exact
 
 
@@ -35,7 +35,12 @@ async def anthropic_messages(request: Request) -> JSONResponse:
             "type": "message",
             "role": "assistant",
             "model": body["model"],
-            "content": [{"type": "text", "text": f"[FAKE PROVIDER] Anthropic answer #{STATE['anthropic']}."}],
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"[FAKE PROVIDER] Anthropic answer #{STATE['anthropic']}.{STATE['suffix']}",
+                }
+            ],
             "stop_reason": "end_turn",
             "stop_sequence": None,
             "usage": {
@@ -69,7 +74,7 @@ async def openai_responses(request: Request) -> JSONResponse:
                     "content": [
                         {
                             "type": "output_text",
-                            "text": f"[FAKE PROVIDER] OpenAI answer #{STATE['openai']}.",
+                            "text": f"[FAKE PROVIDER] OpenAI answer #{STATE['openai']}.{STATE['suffix']}",
                             "annotations": [],
                         }
                     ],
@@ -111,6 +116,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--delay", type=float, default=0.0)
+    parser.add_argument("--reply-suffix", default="", help="appended to every answer, e.g. @mentions")
     args = parser.parse_args()
     STATE["delay"] = args.delay
+    STATE["suffix"] = args.reply_suffix
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")

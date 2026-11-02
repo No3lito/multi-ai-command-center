@@ -11,7 +11,13 @@ from typing import Literal, Protocol
 
 Role = Literal["user", "assistant"]
 ErrorCode = Literal[
-    "auth_failed", "rate_limited", "context_overflow", "content_refused", "unavailable", "bad_request"
+    "auth_failed",
+    "rate_limited",
+    "context_overflow",
+    "content_refused",
+    "unavailable",
+    "bad_request",
+    "timeout",
 ]
 
 
@@ -31,6 +37,11 @@ class ChatRequest:
     def prompt_chars(self) -> int:
         return len(self.system) + sum(len(m.content) for m in self.messages)
 
+    def prompt_bytes(self) -> int:
+        """UTF-8 size of the prompt. A token is never smaller than one byte in practice, so this
+        bounds the input-token count from above for any language or emoji."""
+        return len(self.system.encode("utf-8")) + sum(len(m.content.encode("utf-8")) for m in self.messages)
+
 
 @dataclass(frozen=True)
 class ChatResponse:
@@ -40,6 +51,9 @@ class ChatResponse:
     model: str
     request_id: str | None = None
     stop_reason: str | None = None
+    # False when the provider did not report token usage. The budget then counts the full
+    # reservation as spent instead of zero.
+    usage_reported: bool = True
 
 
 @dataclass(frozen=True)

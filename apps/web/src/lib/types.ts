@@ -134,6 +134,7 @@ export interface Run {
   planner_id: string | null;
   critic_id: string | null;
   agent_id: string | null;
+  root_run_id?: string | null;
   turn_count: number;
   max_turns: number;
   budget_usd: number;

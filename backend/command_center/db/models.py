@@ -154,6 +154,8 @@ class Run(Base):
     planner_id: Mapped[str | None] = mapped_column(ForeignKey("principals.id"), nullable=True)
     critic_id: Mapped[str | None] = mapped_column(ForeignKey("principals.id"), nullable=True)
     agent_id: Mapped[str | None] = mapped_column(ForeignKey("principals.id"), nullable=True)
+    # Every run belongs to a tree started by one human action. Limits and budget apply per tree.
+    root_run_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     trigger_message_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     last_message_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     hop: Mapped[int] = mapped_column(Integer, default=0)
@@ -179,6 +181,7 @@ class Run(Base):
         ),
         Index("runs_active", "status", "created_at", postgresql_where="status in ('queued','running')"),
         Index("runs_by_room", "room_id", "created_at"),
+        Index("runs_by_root", "root_run_id"),
     )
 
 
@@ -196,8 +199,9 @@ class SpendCap(Base):
     )
 
     __table_args__ = (
+        # No "spent <= cap" constraint: true spend is always recorded, even if an estimate was
+        # exceeded. Reservations are refused once spent + reserved reaches the cap.
         CheckConstraint("spent_usd >= 0 and reserved_usd >= 0", name="spend_cap_non_negative"),
-        CheckConstraint("spent_usd + reserved_usd <= cap_usd + 0.000001", name="spend_cap_not_exceeded"),
     )
 
 

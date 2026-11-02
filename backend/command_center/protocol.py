@@ -201,6 +201,7 @@ class RunOut(Strict):
     planner_id: str | None
     critic_id: str | None
     agent_id: str | None
+    root_run_id: str | None = None
     turn_count: int
     max_turns: int
     budget_usd: float

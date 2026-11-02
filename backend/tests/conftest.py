@@ -157,10 +157,20 @@ def fresh_database_url(database_url: str) -> str:
 
 
 @contextmanager
-def run_fake_providers(delay: float = 0.0) -> Iterator[str]:
+def run_fake_providers(delay: float = 0.0, reply_suffix: str = "") -> Iterator[str]:
     port = _free_port()
     proc = subprocess.Popen(
-        [sys.executable, "-m", "tests.fake_providers", "--port", str(port), "--delay", str(delay)],
+        [
+            sys.executable,
+            "-m",
+            "tests.fake_providers",
+            "--port",
+            str(port),
+            "--delay",
+            str(delay),
+            "--reply-suffix",
+            reply_suffix,
+        ],
         cwd=BACKEND,
     )
     base = f"http://127.0.0.1:{port}"

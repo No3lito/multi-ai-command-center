@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     # Instance-wide cap on real API spend, enforced before every paid request.
     live_budget_usd: float = Field(default=10.0, ge=0, le=1000)
     run_workers: int = Field(default=2, ge=1, le=16)
+    # Overall limit for one provider call, including the SDK's own timeouts. A timed-out call is
+    # counted as billed (full reservation), since the provider may have processed it.
+    provider_call_timeout_seconds: float = Field(default=120.0, ge=5, le=900)
+    # A worker holds a run's lease while executing a step and renews it every heartbeat, so a
+    # slow step is never picked up by a second worker. The lease only expires if the worker dies.
+    run_lease_seconds: int = Field(default=300, ge=30, le=3600)
+    run_heartbeat_seconds: float = Field(default=60.0, ge=1, le=600)
+    # Every run belongs to a tree started by one human action (a message or a collaboration
+    # request). Agent @mentions can add runs to the tree, up to this many in total.
+    max_runs_per_tree: int = Field(default=10, ge=1, le=100)
     default_claude_model: str = "claude-sonnet-5-5"
     default_openai_model: str = "gpt-6.1-sol"
     log_level: str = "INFO"

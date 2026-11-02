@@ -3,25 +3,28 @@
 For every PAID call, in this order:
   1. Refuse if the provider has no key or the model has no known price (never guess a price).
   2. Estimate the worst-case cost: conservative input-token estimate plus the full output limit.
-  3. Atomically reserve that amount against the instance-wide cap (spend_caps) and the run's
-     own budget. If either would be exceeded, the request is NOT sent.
-  4. Call the provider.
-  5. Settle: replace the reservation with the actual cost. If the outcome is unknown (timeout,
-     dropped connection, server error) the full reservation is kept as spent, so spend is
-     never under-counted. Clear rejections (bad key, bad request) release it.
+  3. Atomically reserve that amount against the instance-wide cap (spend_caps), the run's own
+     budget and its run tree's budget (spent plus open reservations). If any would be exceeded,
+     the request is NOT sent.
+  4. Call the provider, under an overall timeout.
+  5. Settle: replace the reservation with the actual cost, recorded truthfully even if it beats
+     the estimate. If the outcome is unknown (timeout, dropped connection, server error, missing
+     usage report) the full reservation is kept as spent, so spend is never under-counted.
+     Clear rejections (bad key, bad request) release it.
 
 Simulated calls skip steps 1 to 3, cost nothing, and are recorded with simulated=true.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from command_center.config import Settings
@@ -144,12 +147,42 @@ class ModelPort:
             await s.commit()
             return len(stale)
 
+    async def _open_reserved(self, s: AsyncSession, run_ids: object) -> Decimal:
+        total = await s.scalar(
+            select(func.coalesce(func.sum(models.BudgetReservation.amount_usd), 0)).where(
+                models.BudgetReservation.status == "reserved",
+                models.BudgetReservation.run_id.in_(run_ids),  # type: ignore[arg-type]
+            )
+        )
+        return Decimal(total or 0)
+
+    async def _check_run_budgets(self, s: AsyncSession, run_id: str, amount: Decimal) -> None:
+        """Run budget and tree budget, counting open reservations. Locks the tree's root row, so
+        concurrent calls in one tree are checked one at a time."""
+        run = await s.get(models.Run, run_id)
+        if run is None:
+            return
+        root_id = run.root_run_id or run.id
+        root = await s.scalar(select(models.Run).where(models.Run.id == root_id).with_for_update())
+        await s.refresh(run)
+        own = run.spent_usd + await self._open_reserved(s, [run.id])
+        if own + amount > run.budget_usd:
+            raise BudgetExceeded("run", amount, max(run.budget_usd - own, Decimal(0)))
+        if root is None:
+            return
+        in_tree = (models.Run.root_run_id == root.id) | (models.Run.id == root.id)
+        tree_ids = select(models.Run.id).where(in_tree)
+        tree_spent = Decimal(
+            await s.scalar(select(func.coalesce(func.sum(models.Run.spent_usd), 0)).where(in_tree)) or 0
+        )
+        used = tree_spent + await self._open_reserved(s, tree_ids)
+        if used + amount > root.budget_usd:
+            raise BudgetExceeded("run tree", amount, max(root.budget_usd - used, Decimal(0)))
+
     async def _reserve(self, run_id: str | None, amount: Decimal) -> str:
         async with self.sessionmaker() as s:
             if run_id is not None:
-                run = await s.scalar(select(models.Run).where(models.Run.id == run_id).with_for_update())
-                if run is not None and run.spent_usd + amount > run.budget_usd:
-                    raise BudgetExceeded("run", amount, max(run.budget_usd - run.spent_usd, Decimal(0)))
+                await self._check_run_budgets(s, run_id, amount)
             row = (
                 await s.execute(
                     update(models.SpendCap)
@@ -180,9 +213,16 @@ class ModelPort:
         )
         if cap is not None:
             cap.reserved_usd = max(cap.reserved_usd - r.amount_usd, Decimal(0))
-            # If the conservative estimate was still exceeded, record spend up to the cap; the
-            # true figure stays in the usage ledger.
-            cap.spent_usd = min(cap.spent_usd + actual, cap.cap_usd - cap.reserved_usd)
+            # Always the true amount, even if it beats the estimate (and so the cap). Spend is
+            # never hidden; new reservations are refused once spent + reserved reaches the cap.
+            if actual > r.amount_usd:
+                log.warning(
+                    "actual cost %s exceeded the reserved worst case %s (reservation %s)",
+                    actual,
+                    r.amount_usd,
+                    r.id,
+                )
+            cap.spent_usd = cap.spent_usd + actual
         r.actual_usd = actual
         r.status = "settled" if actual > 0 else "released"
         r.settled_at = datetime.now(UTC)
@@ -244,17 +284,30 @@ class ModelPort:
                 f"No known price for {profile.provider}:{profile.model}; live calls to it are blocked.",
             )
         adapter = self._adapter(profile.provider)
-        worst = price.cost(estimate_input_tokens(req.prompt_chars()), req.max_output_tokens)
+        worst = price.cost(estimate_input_tokens(req.prompt_bytes()), req.max_output_tokens)
         reservation_id = await self._reserve(run_id, worst)
+        timeout = self.settings.provider_call_timeout_seconds
         try:
-            resp = await adapter.generate(req)
+            try:
+                resp = await asyncio.wait_for(adapter.generate(req), timeout)
+            except TimeoutError as exc:
+                raise ProviderError(
+                    "timeout",
+                    f"No answer within {timeout:.0f} seconds; counted as billed to be safe",
+                    retryable=False,
+                    maybe_billed=True,
+                ) from exc
         except ProviderError as exc:
             await self._settle(reservation_id, worst if exc.maybe_billed else Decimal(0))
             raise
         except BaseException:
             await self._settle(reservation_id, worst)  # unknown outcome: assume billed
             raise
-        actual = price.cost(resp.input_tokens, resp.output_tokens)
+        if resp.usage_reported:
+            actual = price.cost(resp.input_tokens, resp.output_tokens)
+        else:
+            log.warning("%s did not report usage; counting the full reservation", profile.provider)
+            actual = worst
         await self._settle(reservation_id, actual)
         await self._record(profile, run_id, resp, actual, simulated=False, reservation_id=reservation_id)
         log.info(

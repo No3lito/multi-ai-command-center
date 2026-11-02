@@ -12,7 +12,12 @@ Extends [Milestone A](milestone-a.md); everything there still applies (auth, CSR
 - **Provider mode** (`PROVIDER_MODE` setting):
   - `live` (default): agents call the real Anthropic or OpenAI API. A missing key makes the turn fail with a clear error message in the room. There is never a silent fallback.
   - `simulated`: every agent uses a deterministic local stand-in that costs nothing. Every simulated message carries `body.data.simulated = true` and the dashboard labels it **SIMULATED**.
-- **Spending cap:** a persistent instance-wide cap on live spend (`LIVE_BUDGET_USD`, default `10.00`). Before every paid request the worst-case cost is reserved atomically. If the reservation would exceed the cap (or the run's own budget), the request is not sent. Actual cost then replaces the reservation.
+- **Run tree:** every run belongs to a tree started by one human action. A `collab` run is the root of its own tree. The runs created by one human message share one tree; the first is the root. Runs that agent @mentions create join their parent's tree. `root_run_id` names the root.
+- **Spending cap:** a persistent instance-wide cap on live spend (`LIVE_BUDGET_USD`, default `10.00`). Before every paid request the worst-case cost is reserved atomically: input tokens are estimated as one per UTF-8 byte of prompt (an upper bound for any language) plus the full output limit. The request is not sent if the reservation would exceed:
+  - the instance cap (spent plus open reservations),
+  - the run's own budget (spent plus its open reservations), or
+  - the tree's budget, which is the root run's `budget_usd`, shared by every run in the tree (spent plus open reservations).
+- **Settlement:** the actual cost replaces the reservation and is always recorded truthfully, even if it exceeds the estimate; new reservations are then refused. If the outcome is unknown (timeout, dropped connection, server error, or no usage report) the full reservation counts as spent. Each provider call has an overall timeout (`PROVIDER_CALL_TIMEOUT_SECONDS`, default `120`), and a timeout counts as billed.
 
 ## Message additions (CCMP v1, no schema change)
 
@@ -57,7 +62,7 @@ Agent and coordinator messages use the existing envelope:
 | POST | `/api/rooms/{room_id}/runs` | `{"goal": "Create a basic login interface", "planner_id": "agt_...", "critic_id": "agt_...", "budget_usd": 0.50, "max_turns": 8}` | `201 Run` |
 | GET | `/api/rooms/{room_id}/runs?limit=20` | none | `200 Run[]` newest first |
 | GET | `/api/runs/{run_id}` | none | `200 Run` |
-| POST | `/api/runs/{run_id}/cancel` | none | `200 Run` (no-op if already finished) |
+| POST | `/api/runs/{run_id}/cancel` | none | `200 Run`. Cancels this run and every unfinished run in its tree; a cancelled tree gets no new runs. No-op if already finished. |
 
 `budget_usd` defaults to `0.50` (maximum `5.00`), and `max_turns` defaults to `8` (maximum `20`). Planner and critic must be different agents and members of the room.
 
@@ -69,6 +74,7 @@ Agent and coordinator messages use the existing envelope:
   "status": "queued" | "running" | "completed" | "failed" | "cancelled" | "budget_exceeded",
   "goal": "...", "step": "plan" | "critique" | "revise" | "summary" | "reply" | "done",
   "planner_id": "agt_..." | null, "critic_id": "agt_..." | null, "agent_id": "agt_..." | null,
+  "root_run_id": "run_...",
   "turn_count": 2, "max_turns": 8,
   "budget_usd": 0.5, "spent_usd": 0.0123,
   "simulated": false, "error": null,
@@ -86,7 +92,13 @@ The coordinator posts a `task.assign` message before each agent step and a `task
 
 When a chat message mentions an agent that is a member of the room, a `reply` run is created for each mentioned agent (at most 5 per message). That agent answers with `reply_to` set to the message.
 
-An agent reply can itself mention other agents, which creates further runs. The chain is limited to 3 agent hops from a human message, so agents cannot loop.
+An agent reply can itself mention other agents, which creates further runs in the same tree. Limits, all enforced before any paid call:
+
+- at most 3 agent hops from the human message;
+- at most `MAX_RUNS_PER_TREE` runs per tree (default `10`); further mentions are ignored;
+- one shared budget per tree: `0.50` USD for a tree started by a chat message (each reply run also has its own `0.25` limit), or the collab run's `budget_usd`.
+
+A run that has already finished (for example cancelled) never changes status again. If a step's answer was already posted before a crash, the step reuses it instead of calling the model again.
 
 ## Usage
 

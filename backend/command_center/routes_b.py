@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Query, Request
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from command_center.config import Settings
@@ -29,7 +29,8 @@ from command_center.protocol import (
 from command_center.providers.model_port import LIVE_SCOPE, agent_status
 from command_center.providers.prices import price_for
 
-DEFAULT_REPLY_BUDGET = Decimal("0.25")
+DEFAULT_REPLY_BUDGET = Decimal("0.25")  # per reply run
+REPLY_TREE_BUDGET = Decimal("0.50")  # shared by every run triggered from one human message
 
 CLAUDE_PROMPT = (
     "You lead planning. Turn goals into clear, ordered, testable steps, and say what you would "
@@ -109,6 +110,7 @@ def run_out(r: models.Run) -> RunOut:
         planner_id=r.planner_id,
         critic_id=r.critic_id,
         agent_id=r.agent_id,
+        root_run_id=r.root_run_id,
         turn_count=r.turn_count,
         max_turns=r.max_turns,
         budget_usd=float(r.budget_usd),
@@ -197,7 +199,8 @@ def register(
         a = await session.get(models.AgentProfile, agent_id)
         if p is None or a is None:
             raise api_error(404, "agent_not_found", "Agent not found")
-        changes = body.model_dump(exclude_unset=True)
+        # null means "leave unchanged" (every field is non-nullable in the database).
+        changes = body.model_dump(exclude_unset=True, exclude_none=True)
         if "display_name" in changes:
             if await name_taken(session, changes["display_name"], exclude=agent_id):
                 raise api_error(409, "agent_exists", "An agent with that name already exists")
@@ -211,7 +214,7 @@ def register(
             principal.id,
             agent_id,
             request,
-            fields=sorted(body.model_dump(exclude_unset=True)),
+            fields=sorted(body.model_dump(exclude_unset=True, exclude_none=True)),
         )
         return agent_out(settings, p, a)
 
@@ -249,8 +252,10 @@ def register(
         for role, agent_id in (("planner", body.planner_id), ("critic", body.critic_id)):
             if agent_id not in agents:
                 raise api_error(422, "validation_error", f"{role}_id: not an enabled agent in this room")
+        run_id = new_id("run")
         run = models.Run(
-            id=new_id("run"),
+            id=run_id,
+            root_run_id=run_id,  # a collaboration is the root of its own run tree
             room_id=room_id,
             kind="collab",
             status="queued",
@@ -301,13 +306,23 @@ def register(
     async def cancel_run(
         run_id: str, request: Request, principal: PrincipalDep, session: SessionDep
     ) -> RunOut:
+        """Cancels the run and every unfinished run in its tree (replies it triggered, and so on)."""
         run = await own_run(session, run_id, principal)
-        if run.status in ("queued", "running"):
-            run.status = "cancelled"
-            run.finished_at = func.now()
-            await session.commit()
-            await session.refresh(run)
-            await audit(session, "run.cancel", principal.id, run.id, request)
+        root_id = run.root_run_id or run.id
+        result = await session.execute(
+            update(models.Run)
+            .where(
+                (models.Run.root_run_id == root_id) | (models.Run.id == root_id) | (models.Run.id == run.id),
+                models.Run.status.in_(("queued", "running")),
+            )
+            .values(status="cancelled", finished_at=func.now(), lease_expires_at=None)
+            .returning(models.Run.id)
+        )
+        cancelled = [row[0] for row in result.all()]
+        await session.commit()
+        await session.refresh(run)
+        if cancelled:
+            await audit(session, "run.cancel", principal.id, run.id, request, cancelled=cancelled)
         return run_out(run)
 
     # ------------------------------------------------------------ usage
@@ -379,6 +394,8 @@ async def route_mentions(
         hop=1,
         budget_usd=DEFAULT_REPLY_BUDGET,
         simulated=settings.provider_mode == "simulated",
+        tree_budget_usd=REPLY_TREE_BUDGET,
+        max_runs_per_tree=settings.max_runs_per_tree,
     )
     if runs and getattr(app.state, "worker", None) is not None:
         app.state.worker.wake()

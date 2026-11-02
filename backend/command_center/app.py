@@ -5,6 +5,7 @@ import base64
 import contextlib
 import hashlib
 import logging
+import os
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -210,14 +211,40 @@ def create_app(config: Settings | None = None) -> FastAPI:
         settled = await model_port.settle_stale_reservations()
         if settled:
             log.warning("settled %d stale budget reservations as fully spent", settled)
+        for var in ("ANTHROPIC_BASE_URL", "OPENAI_BASE_URL"):
+            if os.environ.get(var):
+                log.warning(
+                    "%s is set: provider requests (and API keys) go to %s instead of the official API",
+                    var,
+                    os.environ[var],
+                )
         engine = BuiltinEngine(
             db.sessionmaker,
             model_port,
             coordinator_id,
             reply_budget_usd=routes_b.DEFAULT_REPLY_BUDGET,
             simulated=settings.provider_mode == "simulated",
+            max_runs_per_tree=settings.max_runs_per_tree,
         )
-        worker = RunWorker(db.sessionmaker, engine, settings.run_workers)
+        worker = RunWorker(
+            db.sessionmaker,
+            engine,
+            settings.run_workers,
+            lease_seconds=settings.run_lease_seconds,
+            heartbeat_seconds=settings.run_heartbeat_seconds,
+        )
+
+        async def sweep_reservations() -> None:
+            while True:
+                await asyncio.sleep(300)
+                try:
+                    n = await model_port.settle_stale_reservations()
+                    if n:
+                        log.warning("settled %d stale budget reservations as fully spent", n)
+                except Exception as exc:
+                    log.warning("reservation sweep failed (%s)", type(exc).__name__)
+
+        sweeper = asyncio.create_task(sweep_reservations(), name="reservation-sweep")
         app.state.worker = worker
         app.state.model_port = model_port
         await hub.start()
@@ -226,6 +253,9 @@ def create_app(config: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            sweeper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sweeper
             await worker.stop()
             await hub.stop()
             await db.dispose()
