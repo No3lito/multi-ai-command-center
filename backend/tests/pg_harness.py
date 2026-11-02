@@ -118,3 +118,15 @@ def temporary_postgres() -> Iterator[str]:
             capture_output=True,
         )
         shutil.rmtree(root, ignore_errors=True)
+
+
+def create_database(cluster_url: str, name: str) -> str:
+    """Create another empty database in the same cluster; returns its URL."""
+    base, _, _db = cluster_url.rpartition("/")
+    bindir = _pg_bin()
+    subprocess.run(
+        [str(bindir / "psql"), f"{base}/postgres", "-qc", f'CREATE DATABASE "{name}"'],
+        check=True,
+        capture_output=True,
+    )
+    return f"{base}/{name}"

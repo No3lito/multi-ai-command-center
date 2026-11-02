@@ -21,6 +21,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="command-center")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("migrate", help="apply database migrations")
+    sub.add_parser("live-check", help="one tiny real request per provider, through the spending cap")
     serve = sub.add_parser("serve", help="run the API and dashboard")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
@@ -28,6 +29,10 @@ def main() -> None:
 
     if args.cmd == "migrate":
         migrate()
+    elif args.cmd == "live-check":
+        from command_center.live_check import main as live_check
+
+        live_check()
     elif args.cmd == "serve":
         import uvicorn
 

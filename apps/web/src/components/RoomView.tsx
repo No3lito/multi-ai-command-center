@@ -1,14 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, isApiError } from "@/lib/api";
-import type { Room, RoomDetail } from "@/lib/types";
+import type { Agent, Room, RoomDetail } from "@/lib/types";
+import { useAgents } from "@/lib/useAgents";
 import { useOutbox } from "@/lib/useOutbox";
 import { useRoomStream } from "@/lib/useRoomStream";
-import { Composer } from "./Composer";
+import { useRuns } from "@/lib/useRuns";
+import { useUsage } from "@/lib/useUsage";
+import { AgentsPanel, type RoomAgent } from "./AgentsPanel";
+import { CollabForm } from "./CollabForm";
+import { Composer, type MentionAgent } from "./Composer";
 import { ConnectionPill } from "./ConnectionPill";
 import { MessageList } from "./MessageList";
 import { RightPanel } from "./RightPanel";
+import { RunsPanel } from "./RunsPanel";
+import { UsagePanel } from "./UsagePanel";
 
 type DetailState =
   | { kind: "loading" }
@@ -33,6 +40,47 @@ export function RoomView(props: Props) {
   const [detailReload, setDetailReload] = useState(0);
   const stream = useRoomStream(detail.kind === "ready" ? roomId : null);
   const outbox = useOutbox(roomId, stream.ingest);
+  const streamReady = stream.phase === "ready";
+  const agentsHook = useAgents();
+  const runs = useRuns(detail.kind === "ready" ? roomId : null, stream.messages, streamReady);
+  const usage = useUsage(stream.messages, streamReady);
+  const roomDetail = detail.kind === "ready" ? detail.detail : null;
+
+  const { roomAgents, otherAgents } = useMemo(
+    () => splitAgents(roomDetail, agentsHook.agents),
+    [roomDetail, agentsHook.agents],
+  );
+
+  const mentionAgents = useMemo<MentionAgent[]>(
+    () =>
+      roomAgents.map(({ member, agent }) => ({
+        id: member.id,
+        display_name: member.display_name,
+        detail: agent ? `${agent.provider} / ${agent.model}` : undefined,
+      })),
+    [roomAgents],
+  );
+
+  const agentName = useCallback(
+    (id: string | null) => {
+      if (!id) return null;
+      return (
+        roomDetail?.members.find((m) => m.id === id)?.display_name ??
+        agentsHook.agents.find((a) => a.id === id)?.display_name ??
+        null
+      );
+    },
+    [roomDetail, agentsHook.agents],
+  );
+
+  const addAgent = useCallback(
+    async (agentId: string) => {
+      if (!roomId) return;
+      const updated = await api.addRoomMember(roomId, agentId);
+      setDetail({ kind: "ready", detail: updated });
+    },
+    [roomId],
+  );
 
   useEffect(() => {
     if (!roomId) return;
@@ -143,7 +191,12 @@ export function RoomView(props: Props) {
           onRetry={outbox.retry}
           onDiscard={outbox.discard}
         />
-        <Composer onSend={outbox.send} disabled={detail.kind !== "ready"} roomName={roomName} />
+        <Composer
+          onSend={outbox.send}
+          disabled={detail.kind !== "ready"}
+          roomName={roomName}
+          agents={mentionAgents}
+        />
       </>
     );
   }
@@ -160,9 +213,47 @@ export function RoomView(props: Props) {
         status={stream.status}
         lastSeq={stream.lastSeq}
         hasRoom={!!roomId && !notFound}
-      />
+      >
+        <AgentsPanel
+          hasRoom={!!roomDetail && !notFound}
+          loading={agentsHook.state.kind === "loading"}
+          error={agentsHook.state.kind === "error" ? agentsHook.state.message : null}
+          roomAgents={roomAgents}
+          otherAgents={otherAgents}
+          onAdd={addAgent}
+          onRetry={agentsHook.reload}
+        />
+        {roomDetail && !notFound && (
+          <CollabForm roomId={roomId} roomAgents={roomAgents} createRun={api.createRun} onStarted={runs.addRun} />
+        )}
+        <RunsPanel
+          hasRoom={!!roomDetail && !notFound}
+          runs={runs.runs}
+          loaded={runs.loaded}
+          error={runs.error}
+          agentName={agentName}
+          onCancel={runs.cancel}
+          onRetry={runs.reload}
+        />
+        <UsagePanel usage={usage.usage} error={usage.error} />
+      </RightPanel>
     </>
   );
+}
+
+/** Room members of kind agent (with their profile), and the other known agents that are not in the room. */
+export function splitAgents(
+  detail: RoomDetail | null,
+  agents: readonly Agent[],
+): { roomAgents: RoomAgent[]; otherAgents: Agent[] } {
+  if (!detail) return { roomAgents: [], otherAgents: [] };
+  const byId = new Map(agents.map((a) => [a.id, a]));
+  const roomAgents = detail.members
+    .filter((m) => m.kind === "agent")
+    .map((member) => ({ member, agent: byId.get(member.id) ?? null }));
+  const inRoom = new Set(roomAgents.map((r) => r.member.id));
+  const otherAgents = agents.filter((a) => !inRoom.has(a.id));
+  return { roomAgents, otherAgents };
 }
 
 function EmptyState({

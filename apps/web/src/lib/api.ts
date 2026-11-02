@@ -1,4 +1,16 @@
-import type { Message, MessagePage, PostMessageBody, Principal, Room, RoomDetail } from "./types";
+import type {
+  Agent,
+  AgentIn,
+  CreateRunBody,
+  Message,
+  MessagePage,
+  PostMessageBody,
+  Principal,
+  Room,
+  RoomDetail,
+  Run,
+  Usage,
+} from "./types";
 
 /** Error with the contract's `{"error": {"code", "message"}}` shape mapped onto it. */
 export class ApiError extends Error {
@@ -136,16 +148,38 @@ export const api = {
     request<MessagePage>(`/api/rooms/${enc(roomId)}/messages?after_seq=${afterSeq}&limit=${limit}`, {
       signal,
     }),
-  postMessage: (roomId: string, text: string, idempotencyKey: string) => {
+  postMessage: (roomId: string, text: string, idempotencyKey: string, mentions: readonly string[] = []) => {
     const body: PostMessageBody = {
       kind: "chat",
       body: { text },
       reply_to: null,
-      mentions: [],
+      mentions: [...mentions],
       idempotency_key: idempotencyKey,
     };
     return request<Message>(`/api/rooms/${enc(roomId)}/messages`, { method: "POST", body });
   },
+
+  // Milestone B: agents
+  listAgents: (signal?: AbortSignal) => request<Agent[]>("/api/agents", { signal }),
+  createAgent: (agent: AgentIn) => request<Agent>("/api/agents", { method: "POST", body: agent }),
+  updateAgent: (agentId: string, patch: Partial<AgentIn>) =>
+    request<Agent>(`/api/agents/${enc(agentId)}`, { method: "PATCH", body: patch }),
+  addRoomMember: (roomId: string, principalId: string) =>
+    request<RoomDetail>(`/api/rooms/${enc(roomId)}/members`, {
+      method: "POST",
+      body: { principal_id: principalId },
+    }),
+
+  // Milestone B: runs
+  createRun: (roomId: string, body: CreateRunBody) =>
+    request<Run>(`/api/rooms/${enc(roomId)}/runs`, { method: "POST", body }),
+  listRuns: (roomId: string, limit = 20, signal?: AbortSignal) =>
+    request<Run[]>(`/api/rooms/${enc(roomId)}/runs?limit=${limit}`, { signal }),
+  getRun: (runId: string, signal?: AbortSignal) => request<Run>(`/api/runs/${enc(runId)}`, { signal }),
+  cancelRun: (runId: string) => request<Run>(`/api/runs/${enc(runId)}/cancel`, { method: "POST" }),
+
+  // Milestone B: usage and cost
+  getUsage: (signal?: AbortSignal) => request<Usage>("/api/usage", { signal }),
 };
 
 export type Api = typeof api;

@@ -2,9 +2,72 @@
 
 Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
 
-## Milestone A: foundation (in review)
+## Milestone B: live AI collaboration (in review)
 
-Branch: `agent/claude/milestone-a`. Not merged until the owner approves.
+Branch: `agent/claude/milestone-b`, draft PR #4. Not merged until the owner approves. Contract: [`docs/api/milestone-b.md`](api/milestone-b.md).
+
+### Evidence labels
+
+- **Simulated:** `PROVIDER_MODE=simulated`, deterministic stand-ins, no network, no cost. Proves workflow and UI.
+- **Fake provider:** the full live code path (keys, official Anthropic and OpenAI SDKs, HTTP, cost accounting, spending cap) against a local fake server that imitates both APIs. Proves the plumbing and the money logic, **not** the real APIs.
+- **Real API:** run by the owner on his machine with his own keys (see "Real API verification" below).
+
+### What works
+
+| Feature | Evidence |
+| --- | --- |
+| Claude (Anthropic Messages API) and GPT (OpenAI Responses API, `store=false`) agents as separate participants with their own identities, roles and models | Fake provider: `test_providers_mocked.py`, `test_live_code_path_with_fake_providers` |
+| Coordinator runs plan, critique, revise, summary between two agents, narrated in the room | Simulated and fake provider: `test_coordinator.py`; browser: `tests/e2e/milestone-b.spec.ts` |
+| @mention routing: agents answer human messages and can address each other | Simulated: `test_mention_creates_reply`; fake provider: `test_review_fixes.py` |
+| $10 live cap enforced before every paid request: worst-case reservation, run and run-tree budgets, concurrency-safe, true spend recorded | Fake adapter: `test_budget.py`, `test_review_fixes.py` |
+| Missing keys fail loudly; no silent fallback to simulated answers | `test_live_mode_without_keys_fails_loudly` |
+| Usage and cost per provider and model, simulated calls counted separately | `test_coordinator.py`, dashboard Usage panel |
+| `command-center live-check`: one tiny real call per provider through the cap | Fake provider: `test_live_check_command_with_fake_providers`. **Real API: verified by the owner** |
+| Durable runs: Postgres lease with heartbeat, survive restarts, cancel stops a whole run tree | `test_review_fixes.py`, `test_cancel_during_model_call` |
+
+Screenshot (simulated): [`docs/screenshots/milestone-b-simulated-run.png`](screenshots/milestone-b-simulated-run.png)
+
+### Test results (latest run)
+
+| Suite | Result |
+| --- | --- |
+| Backend: pytest against real PostgreSQL 16, live servers and fake providers | 95 passed, 3 consecutive runs |
+| Backend: ruff lint and format, mypy strict | clean |
+| Dashboard: Vitest; TypeScript; production build | 78 passed; clean |
+| Browser end-to-end: Playwright in Chrome (simulated mode) | 3 passed |
+
+### Real API verification (Nov 2, 2026, owner's Windows machine, Docker)
+
+| Check | Result |
+| --- | --- |
+| `command-center live-check` | Anthropic `claude-haiku-5-5` and OpenAI `gpt-6-luna` both answered `OK`; $0.000015 recorded against the $10 cap |
+| Real collaboration ("Create a basic login interface", Claude plans, GPT reviews) | Completed with real Claude Sonnet 5.5 and GPT-6.1 Sol answers; the run cost $0.0305. Total real spend so far: $0.0658 of $10 |
+
+The first real run found three problems, now fixed with tests:
+
+| Problem | Fix |
+| --- | --- |
+| A collaboration's @mentions also started reply runs, so Claude answered twice in parallel and agents kept replying after the summary | Only free conversation (reply runs) spawns replies; a collaboration speaks strictly in turn |
+| 1024 output tokens cut Claude's plans off mid-sentence | Default raised to 2048 (migration 0004 moves agents still on 1024); any cut-off answer is now labeled as cut off |
+| The goal was not visible in the room, so agents doubted it came from the owner | Step 1 now names the goal |
+
+A new test also exposed a database deadlock when two runs in one tree reserved and settled at the same moment; lock order is now the same everywhere.
+
+### Independent security review
+
+No critical findings. Every must-fix item is fixed with a regression test in `backend/tests/test_review_fixes.py`:
+
+| # | Severity | Finding | Fix |
+| --- | --- | --- | --- |
+| 1 | High | Agents mentioning each other could fan one message out to 155 paid calls | Runs form trees: at most 10 runs (`MAX_RUNS_PER_TREE`) and one shared budget per tree ($0.50 for a chat message); cancel stops the whole tree |
+| 2 | Medium | Token estimate (characters / 2.5) undercounted emoji and non-Latin text | One token per UTF-8 byte, an upper bound for any text |
+| 3 | Medium | Spend above the estimate was clamped to the cap | True amount always recorded; further calls refused |
+| 4 | Medium | No overall call timeout; lease could expire during a slow step; run budget ignored in-flight reservations | 120 s overall timeout counted as billed; lease heartbeat; budgets include open reservations |
+| 5 | Medium | `PATCH /api/agents` with `null` returned 500 | `null` means unchanged |
+
+Low items also fixed: finished runs never change status, missing usage is billed at the worst case, a step already answered before a crash is not paid for twice, transcript lines are JSON so message text cannot impersonate another speaker, a warning when a provider base URL is overridden, and stale reservations are swept every 5 minutes.
+
+## Milestone A: foundation (accepted, merged in PR #3)
 
 ### What works
 
@@ -64,10 +127,8 @@ Verified by the owner on Windows with Docker Desktop 29.9.2 (WSL 2): `docker com
 
 | For | Item |
 | --- | --- |
-| Milestone A sign-off | Docker run verified; approve PR #3 for merge |
-| Milestone B | Anthropic and OpenAI API keys, added to a local `.env` (never pasted into chat or committed). Approved live-test budget: $10 total, enforced in code before any live call |
-| Milestone B (optional) | Allow `api.openai.com` in claude.ai Settings > Capabilities so OpenAI can be tested in the cloud build environment; otherwise OpenAI live tests run on your machine |
+| Milestone B sign-off | Review PR #4 and approve the merge |
 
-## Next: Milestone B (live AI collaboration)
+## Next: Milestone C
 
-Claude and OpenAI agents as separate participants, agent identities, a coordinator that assigns work and routes messages, usage and cost tracking with the spending cap enforced before each call.
+Approvals, emergency stop, idempotency and budget controls in the dashboard, more tests.

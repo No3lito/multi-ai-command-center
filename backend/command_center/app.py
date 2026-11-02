@@ -5,6 +5,7 @@ import base64
 import contextlib
 import hashlib
 import logging
+import os
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -24,7 +25,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from command_center import auth
+from command_center import auth, routes_b
 from command_center.config import Settings, get_settings
 from command_center.db import models
 from command_center.db.session import Database
@@ -32,6 +33,8 @@ from command_center.ids import new_id
 from command_center.logging_setup import configure_logging
 from command_center.messaging import service
 from command_center.messaging.hub import RoomHub
+from command_center.orchestrator.engine import BuiltinEngine
+from command_center.orchestrator.worker import RunWorker
 from command_center.protocol import (
     LoginIn,
     LoginOut,
@@ -42,6 +45,7 @@ from command_center.protocol import (
     RoomDetailOut,
     RoomOut,
 )
+from command_center.providers.model_port import ModelPort
 
 log = logging.getLogger(__name__)
 
@@ -197,13 +201,62 @@ def create_app(config: Settings | None = None) -> FastAPI:
     limiter = auth.LoginRateLimiter(settings.login_max_failures, settings.login_window_seconds)
     csp = build_csp(settings.web_dist, settings)
 
+    model_port = ModelPort(settings, db.sessionmaker)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await bootstrap(db, settings)
+        coordinator_id = await routes_b.seed(db, settings)
+        await model_port.ensure_cap()
+        settled = await model_port.settle_stale_reservations()
+        if settled:
+            log.warning("settled %d stale budget reservations as fully spent", settled)
+        for var in ("ANTHROPIC_BASE_URL", "OPENAI_BASE_URL"):
+            if os.environ.get(var):
+                log.warning(
+                    "%s is set: provider requests (and API keys) go to %s instead of the official API",
+                    var,
+                    os.environ[var],
+                )
+        engine = BuiltinEngine(
+            db.sessionmaker,
+            model_port,
+            coordinator_id,
+            reply_budget_usd=routes_b.DEFAULT_REPLY_BUDGET,
+            simulated=settings.provider_mode == "simulated",
+            max_runs_per_tree=settings.max_runs_per_tree,
+        )
+        worker = RunWorker(
+            db.sessionmaker,
+            engine,
+            settings.run_workers,
+            lease_seconds=settings.run_lease_seconds,
+            heartbeat_seconds=settings.run_heartbeat_seconds,
+        )
+
+        async def sweep_reservations() -> None:
+            while True:
+                await asyncio.sleep(300)
+                try:
+                    n = await model_port.settle_stale_reservations()
+                    if n:
+                        log.warning("settled %d stale budget reservations as fully spent", n)
+                except Exception as exc:
+                    log.warning("reservation sweep failed (%s)", type(exc).__name__)
+
+        sweeper = asyncio.create_task(sweep_reservations(), name="reservation-sweep")
+        app.state.worker = worker
+        app.state.model_port = model_port
         await hub.start()
+        await worker.start()
+        log.info("provider mode: %s", settings.provider_mode)
         try:
             yield
         finally:
+            sweeper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sweeper
+            await worker.stop()
             await hub.stop()
             await db.dispose()
 
@@ -424,7 +477,21 @@ def create_app(config: Settings | None = None) -> FastAPI:
             raise ApiError(
                 409, "idempotency_conflict", "idempotency_key was already used in another room"
             ) from exc
+        if result.created:
+            await routes_b.route_mentions(
+                app, settings, session, room_id, result.message.id, result.message.mentions, principal
+            )
         return JSONResponse(jsonable_encoder(result.message), 201 if result.created else 200)
+
+    routes_b.register(
+        app,
+        settings=settings,
+        get_session=get_session,
+        current_principal=current_principal,
+        member_room=member_room,
+        api_error=ApiError,
+        audit=audit,
+    )
 
     # ------------------------------------------------------------ websocket
 

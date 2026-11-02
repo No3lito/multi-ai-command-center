@@ -35,6 +35,11 @@ services:
       OWNER_DISPLAY_NAME: ${OWNER_DISPLAY_NAME:-Owner}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # AI providers (Milestone B). Keys stay in your local .env, which git ignores.
+      PROVIDER_MODE: ${PROVIDER_MODE:-live}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LIVE_BUDGET_USD: ${LIVE_BUDGET_USD:-10.00}
     ports:
       - "127.0.0.1:8000:8000"
     read_only: true

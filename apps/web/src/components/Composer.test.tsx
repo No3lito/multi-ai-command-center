@@ -15,7 +15,7 @@ describe("Composer", () => {
     render(<Composer onSend={onSend} roomName="General" />);
     const input = screen.getByTestId("composer-input");
     await user.type(input, "hello{Enter}");
-    expect(onSend).toHaveBeenCalledWith("hello");
+    expect(onSend).toHaveBeenCalledWith("hello", []);
     expect(input).toHaveValue("");
   });
 
@@ -28,7 +28,7 @@ describe("Composer", () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(input).toHaveValue("line 1\nline 2");
     await user.click(screen.getByTestId("composer-send"));
-    expect(onSend).toHaveBeenCalledWith("line 1\nline 2");
+    expect(onSend).toHaveBeenCalledWith("line 1\nline 2", []);
   });
 
   it("disables send while empty or whitespace only", async () => {
