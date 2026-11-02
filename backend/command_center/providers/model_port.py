@@ -208,6 +208,15 @@ class ModelPort:
             return reservation.id
 
     async def _settle_locked(self, s: AsyncSession, r: models.BudgetReservation, actual: Decimal) -> None:
+        # Lock order everywhere: run-tree root, then spend cap, then the run itself. _reserve
+        # takes the root then the cap; taking them in another order here deadlocked when two
+        # runs of one tree reserved and settled at the same moment.
+        if r.run_id is not None:
+            root_id = await s.scalar(
+                select(func.coalesce(models.Run.root_run_id, models.Run.id)).where(models.Run.id == r.run_id)
+            )
+            if root_id is not None:
+                await s.execute(select(models.Run.id).where(models.Run.id == root_id).with_for_update())
         cap = await s.scalar(
             select(models.SpendCap).where(models.SpendCap.scope == r.scope).with_for_update()
         )

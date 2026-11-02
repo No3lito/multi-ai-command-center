@@ -71,7 +71,7 @@ async def seed(db: Database, settings: Settings) -> str:
                         provider=provider,
                         model=model,
                         system_prompt=prompt,
-                        max_output_tokens=1024,
+                        max_output_tokens=2048,
                         enabled=True,
                     )
                 )
@@ -309,6 +309,8 @@ def register(
         """Cancels the run and every unfinished run in its tree (replies it triggered, and so on)."""
         run = await own_run(session, run_id, principal)
         root_id = run.root_run_id or run.id
+        # Same lock order as budget settlement: the tree's root first, then its other runs.
+        await session.execute(select(models.Run.id).where(models.Run.id == root_id).with_for_update())
         result = await session.execute(
             update(models.Run)
             .where(

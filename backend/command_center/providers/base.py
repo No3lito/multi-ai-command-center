@@ -54,6 +54,8 @@ class ChatResponse:
     # False when the provider did not report token usage. The budget then counts the full
     # reservation as spent instead of zero.
     usage_reported: bool = True
+    # True when the answer stopped because it hit the output-token limit (cut off mid-answer).
+    truncated: bool = False
 
 
 @dataclass(frozen=True)

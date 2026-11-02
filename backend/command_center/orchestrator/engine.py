@@ -279,6 +279,11 @@ class BuiltinEngine:
         if current is None or current.status == "cancelled":
             return None  # cancelled while the model was thinking; usage is still recorded
         text = result.response.text.strip() or "(empty response)"
+        if result.response.truncated:
+            text += (
+                f"\n\n[Cut off: this answer reached {name}'s output limit of "
+                f"{profile.max_output_tokens} tokens.]"
+            )
         async with self.sessionmaker() as s:
             mentioned = [
                 a.id for a in find_mentions(text, await room_agents(s, run.room_id)) if a.id != agent_id
@@ -305,7 +310,9 @@ class BuiltinEngine:
             },
         )
         await self._update(run.id, turn_count=run.turn_count + 1, last_message_id=msg_id)
-        if mentioned and run.hop < MAX_REPLY_HOPS:
+        # Only free conversation (reply runs) spawns replies. A collab run already decides who
+        # speaks next; letting its messages trigger replies too made agents answer in parallel.
+        if mentioned and run.kind == "reply" and run.hop < MAX_REPLY_HOPS:
             async with self.sessionmaker() as s:
                 msg = await s.get(models.Message, msg_id)
                 await create_reply_runs(
@@ -362,7 +369,7 @@ class BuiltinEngine:
         plans = {
             "plan": (
                 run.planner_id,
-                f"Step 1 of 3: @{p}, propose a plan for the goal below.",
+                f"Step 1 of 3: @{p}, propose a plan for: {run.goal}",
                 f"Propose a concrete, step-by-step plan for this goal: {run.goal}",
             ),
             "critique": (

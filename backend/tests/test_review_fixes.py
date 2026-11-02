@@ -404,7 +404,7 @@ async def test_agent_mentions_cannot_fan_out_past_the_tree_limit(
                 room_id, agents = await general_and_agents(c)
                 await mention_both(c, room_id, agents)
                 runs = await settle(c, room_id)
-                assert len(runs) == 4, [r["status"] for r in runs]
+                assert len(runs) == 4, [(r["status"], r["error"]) for r in runs]
                 roots = {r["root_run_id"] for r in runs}
                 assert len(roots) == 1 and roots <= {r["id"] for r in runs}
                 calls = await fake_calls(fake)
@@ -446,3 +446,47 @@ async def test_migration_dropped_the_clamp_constraint(world: dict[str, Any]) -> 
             await s.scalars(text("SELECT conname FROM pg_constraint WHERE conrelid = 'spend_caps'::regclass"))
         ).all()
     assert "spend_cap_not_exceeded" not in names and "spend_cap_non_negative" in names
+
+
+# ---------------------------------------------------------------- first real run (Nov 2)
+
+
+async def test_collab_messages_do_not_spawn_parallel_replies(fresh_database_url: str, tmp_path: Path) -> None:
+    """FAKE PROVIDER: in the first real collab, the critique's @Claude made Claude answer twice
+    in parallel (the collab revise step and a reply run). A collab now speaks only in turn."""
+    with run_fake_providers(reply_suffix=" @Claude @GPT over to you.") as fake:
+        env = dict(LIVE_ENV, ANTHROPIC_BASE_URL=fake, OPENAI_BASE_URL=f"{fake}/v1")
+        with run_server(fresh_database_url, tmp_path, **env) as srv:
+            async with logged_in(srv) as c:
+                room_id, agents = await general_and_agents(c)
+                run = await start_collab(c, room_id, agents)
+                assert (await wait_run(c, run["id"]))["status"] == "completed"
+                await asyncio.sleep(1.5)
+                runs = await room_runs(c, room_id)
+                assert [r["kind"] for r in runs] == ["collab"]
+                calls = await fake_calls(fake)
+                assert calls["anthropic"] + calls["openai"] == 3
+                assign = (await c.get(f"/api/rooms/{room_id}/messages")).json()["items"]
+                first = next(m for m in assign if m["kind"] == "task.assign")
+                assert "Create a basic login interface" in first["body"]["text"], "the goal is visible"
+
+
+async def test_cut_off_answers_are_labeled(world: dict[str, Any]) -> None:
+    class CutOff(Adapter):
+        async def generate(self, req: ChatRequest) -> ChatResponse:
+            self.calls += 1
+            return ChatResponse(
+                text="half a plan", input_tokens=10, output_tokens=2048, model=req.model, truncated=True
+            )
+
+    sm = world["sm"]
+    port = await port_for(sm, cfg(world["url"]), CutOff())
+    engine = BuiltinEngine(sm, port, world["coordinator"], Decimal("0.25"), simulated=False)
+    run = await add_run(world)
+    await engine.step(run.id)
+    async with sm() as s:
+        body = await s.scalar(select(models.Message.body_text).where(models.Message.correlation_id == run.id))
+        prof = await s.get(models.AgentProfile, world["agents"]["Claude"].id)
+    assert body is not None and body.startswith("half a plan")
+    assert "[Cut off: this answer reached Claude's output limit of 2048 tokens.]" in body
+    assert prof is not None and prof.max_output_tokens == 2048

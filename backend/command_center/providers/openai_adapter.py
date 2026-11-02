@@ -91,6 +91,8 @@ class OpenAIAdapter:
             model=resp.model,
             request_id=resp.id,
             stop_reason=resp.status,
+            truncated=resp.status == "incomplete"
+            and getattr(resp.incomplete_details, "reason", None) == "max_output_tokens",
         )
 
 

@@ -83,6 +83,7 @@ class AnthropicAdapter:
             model=resp.model,
             request_id=resp.id,
             stop_reason=resp.stop_reason,
+            truncated=resp.stop_reason == "max_tokens",
         )
 
 
