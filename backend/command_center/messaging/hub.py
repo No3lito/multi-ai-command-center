@@ -21,6 +21,9 @@ from command_center.messaging.service import NOTIFY_CHANNEL
 
 log = logging.getLogger(__name__)
 
+# Lets operators (and tests) identify the listener connection in pg_stat_activity.
+LISTENER_APP_NAME = "cc-realtime-listener"
+
 
 class Subscription:
     def __init__(self, hub: RoomHub, room_id: str) -> None:
@@ -93,7 +96,9 @@ class RoomHub:
         while not self._stopping.is_set():
             conn: asyncpg.Connection | None = None
             try:
-                conn = await asyncpg.connect(self._dsn)
+                conn = await asyncpg.connect(
+                    self._dsn, server_settings={"application_name": LISTENER_APP_NAME}
+                )
                 await conn.add_listener(NOTIFY_CHANNEL, self._on_notify)
                 self.connected = True
                 backoff = 1.0

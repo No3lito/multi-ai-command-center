@@ -1,5 +1,5 @@
 /**
- * Types for the Milestone A API contract (docs/api/milestone-a.md) and the
+ * Types for the API contracts (docs/api/milestone-a.md, docs/api/milestone-b.md) and the
  * CCMP v1 message envelope (packages/protocol/ccmp.schema.json).
  */
 
@@ -88,3 +88,98 @@ export type ServerFrame =
 
 export const ROOM_NAME_MAX = 80;
 export const MESSAGE_TEXT_MAX = 32000;
+
+/* ---------------------------------------------------------------------------
+ * Milestone B (docs/api/milestone-b.md): agents, runs and usage.
+ * ------------------------------------------------------------------------- */
+
+export type AgentProvider = "anthropic" | "openai" | "simulated";
+
+/** Whether an agent can run right now. */
+export type AgentStatus = "live" | "simulated" | "missing_key" | "unknown_price" | "disabled";
+
+export interface AgentIn {
+  display_name: string;
+  role: string;
+  provider: AgentProvider;
+  model: string;
+  system_prompt: string;
+  max_output_tokens: number;
+  enabled: boolean;
+}
+
+export interface AgentPrice {
+  input_per_mtok: number;
+  output_per_mtok: number;
+}
+
+export interface Agent extends AgentIn {
+  id: string;
+  kind: "agent";
+  status: AgentStatus;
+  price: AgentPrice | null;
+}
+
+export type RunKind = "collab" | "reply";
+export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "budget_exceeded";
+export type RunStep = "plan" | "critique" | "revise" | "summary" | "reply" | "done";
+
+export interface Run {
+  id: string;
+  room_id: string;
+  kind: RunKind;
+  status: RunStatus;
+  goal: string;
+  step: RunStep;
+  planner_id: string | null;
+  critic_id: string | null;
+  agent_id: string | null;
+  turn_count: number;
+  max_turns: number;
+  budget_usd: number;
+  spent_usd: number;
+  simulated: boolean;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+}
+
+export interface CreateRunBody {
+  goal: string;
+  planner_id: string;
+  critic_id: string;
+  budget_usd?: number;
+  max_turns?: number;
+}
+
+export interface UsageRow {
+  provider: string;
+  model: string;
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  simulated: boolean;
+}
+
+export interface Usage {
+  cap_usd: number;
+  spent_usd: number;
+  reserved_usd: number;
+  remaining_usd: number;
+  by_provider: UsageRow[];
+  /** Calls answered by the local stand-in. Never real API usage; never touch the cap. */
+  simulated_calls: number;
+}
+
+export const RUN_BUDGET_DEFAULT = 0.5;
+export const RUN_BUDGET_MAX = 5;
+export const RUN_MAX_TURNS_DEFAULT = 8;
+
+export const ACTIVE_RUN_STATUSES: readonly RunStatus[] = ["queued", "running"];
+export const isRunActive = (run: Pick<Run, "status">): boolean => ACTIVE_RUN_STATUSES.includes(run.status);
+
+/** Agents that can take a turn right now. */
+export const isAgentUsable = (agent: Pick<Agent, "status">): boolean =>
+  agent.status === "live" || agent.status === "simulated";

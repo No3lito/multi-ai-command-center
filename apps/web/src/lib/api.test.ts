@@ -112,3 +112,88 @@ describe("websocket url", () => {
     expect(roomSocketUrl("room_1", 42, "ws://h")).toBe("ws://h/api/ws/rooms/room_1?after_seq=42");
   });
 });
+
+describe("milestone B api client", () => {
+  const AGT = `agt_${"c".repeat(32)}`;
+
+  it("lists agents and adds an agent to a room with CSRF", async () => {
+    const fetchFn = mockFetch(jsonResponse(200, []));
+    await api.listAgents();
+    expect(fetchFn.mock.calls[0]![0]).toBe("/api/agents");
+
+    const post = mockFetch(jsonResponse(200, { id: "room_1", members: [] }));
+    await api.addRoomMember("room_1", AGT);
+    const [url, init] = post.mock.calls[0]!;
+    expect(url).toBe("/api/rooms/room_1/members");
+    expect(init?.method).toBe("POST");
+    expect((init?.headers as Record<string, string>)["X-CC-CSRF"]).toBe("1");
+    expect(JSON.parse(init?.body as string)).toEqual({ principal_id: AGT });
+  });
+
+  it("creates and patches agents", async () => {
+    const fetchFn = mockFetch(jsonResponse(200, {}));
+    await api.updateAgent(AGT, { enabled: false });
+    expect(fetchFn.mock.calls[0]![0]).toBe(`/api/agents/${AGT}`);
+    expect(fetchFn.mock.calls[0]![1]?.method).toBe("PATCH");
+    expect(JSON.parse(fetchFn.mock.calls[0]![1]?.body as string)).toEqual({ enabled: false });
+
+    mockFetch(jsonResponse(409, { error: { code: "agent_exists", message: "Agent already exists" } }));
+    await expect(
+      api.createAgent({
+        display_name: "Claude",
+        role: "Planner",
+        provider: "anthropic",
+        model: "m",
+        system_prompt: "",
+        max_output_tokens: 1024,
+        enabled: true,
+      }),
+    ).rejects.toMatchObject({ status: 409, code: "agent_exists" });
+  });
+
+  it("creates, lists, gets and cancels runs on the contract paths", async () => {
+    const fetchFn = mockFetch(jsonResponse(201, { id: "run_1" }));
+    await api.createRun("room_1", { goal: "g", planner_id: "agt_a", critic_id: "agt_b", budget_usd: 0.5, max_turns: 8 });
+    expect(fetchFn.mock.calls[0]![0]).toBe("/api/rooms/room_1/runs");
+    expect(JSON.parse(fetchFn.mock.calls[0]![1]?.body as string)).toEqual({
+      goal: "g",
+      planner_id: "agt_a",
+      critic_id: "agt_b",
+      budget_usd: 0.5,
+      max_turns: 8,
+    });
+
+    const list = mockFetch(jsonResponse(200, []));
+    await api.listRuns("room_1");
+    expect(list.mock.calls[0]![0]).toBe("/api/rooms/room_1/runs?limit=20");
+
+    const get = mockFetch(jsonResponse(200, {}));
+    await api.getRun("run_1");
+    expect(get.mock.calls[0]![0]).toBe("/api/runs/run_1");
+
+    const cancel = mockFetch(jsonResponse(200, {}));
+    await api.cancelRun("run_1");
+    expect(cancel.mock.calls[0]![0]).toBe("/api/runs/run_1/cancel");
+    expect(cancel.mock.calls[0]![1]?.method).toBe("POST");
+    expect((cancel.mock.calls[0]![1]?.headers as Record<string, string>)["X-CC-CSRF"]).toBe("1");
+  });
+
+  it("maps 422 from run creation to ApiError", async () => {
+    mockFetch(jsonResponse(422, { error: { code: "validation_error", message: "Planner and critic must differ" } }));
+    await expect(
+      api.createRun("room_1", { goal: "g", planner_id: "agt_a", critic_id: "agt_a" }),
+    ).rejects.toMatchObject({ status: 422, message: "Planner and critic must differ" });
+  });
+
+  it("gets usage", async () => {
+    const fetchFn = mockFetch(jsonResponse(200, { cap_usd: 10 }));
+    await expect(api.getUsage()).resolves.toEqual({ cap_usd: 10 });
+    expect(fetchFn.mock.calls[0]![0]).toBe("/api/usage");
+  });
+
+  it("includes mentions when posting a message", async () => {
+    const fetchFn = mockFetch(jsonResponse(201, { id: "msg_1" }));
+    await api.postMessage("room_1", "@Claude hi", "key-12345678", [AGT]);
+    expect(JSON.parse(fetchFn.mock.calls[0]![1]?.body as string).mentions).toEqual([AGT]);
+  });
+});

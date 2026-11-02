@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { formatCount, formatUsd } from "@/lib/format";
 import type { Message, PrincipalKind } from "@/lib/types";
 import type { PendingMessage } from "@/lib/useOutbox";
 
@@ -149,21 +150,67 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard }: 
   );
 }
 
+const SYSTEM_NOTE_KINDS = new Set<Message["kind"]>(["task.assign", "task.status", "task.result"]);
+
+function dataString(data: Record<string, unknown> | undefined, key: string): string | null {
+  const v = data?.[key];
+  return typeof v === "string" && v ? v : null;
+}
+
+/** True when the message says it came from the deterministic local stand-in. */
+export function isSimulatedMessage(message: Message): boolean {
+  return message.body.data?.simulated === true;
+}
+
 function MessageRow({ message }: { message: Message }) {
+  if (message.sender.kind === "system" && (SYSTEM_NOTE_KINDS.has(message.kind) || message.kind === "error")) {
+    return <SystemNote message={message} />;
+  }
+  return <ChatRow message={message} />;
+}
+
+export function SimulatedBadge() {
+  return (
+    <span
+      data-testid="simulated-badge"
+      title="Produced by the local stand-in, not a real AI provider. No cost."
+      className="rounded border border-warn/40 bg-warn-soft px-1.5 py-px font-mono text-[10px] font-bold uppercase tracking-wider text-warn"
+    >
+      SIMULATED
+    </span>
+  );
+}
+
+function ChatRow({ message }: { message: Message }) {
   const t = formatTime(message.created_at);
+  const data = message.body.data;
+  const isAgent = message.sender.kind === "agent";
+  const provider = isAgent ? dataString(data, "provider") : null;
+  const model = isAgent ? dataString(data, "model") : null;
+  const simulated = isSimulatedMessage(message);
+  const usage = isAgent ? message.usage : null;
+  const tokens = usage ? (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) : 0;
   return (
     <li
       data-testid="message-item"
       data-message-id={message.id}
       data-seq={message.seq}
-      className="group rounded-md px-2 py-1.5 hover:bg-panel"
+      data-sender-kind={message.sender.kind}
+      data-simulated={simulated || undefined}
+      data-correlation-id={message.correlation_id ?? undefined}
+      data-reply-to={message.reply_to ?? undefined}
+      className={`group rounded-md px-2 py-1.5 hover:bg-panel ${simulated ? "border-l-2 border-warn" : ""}`}
     >
-      <div className="flex items-baseline gap-2">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="font-semibold">{message.sender.display_name}</span>
         <KindBadge kind={message.sender.kind} />
-        {message.kind !== "chat" && (
-          <span className="font-mono text-[10px] text-muted">{message.kind}</span>
+        {(provider || model) && (
+          <span data-testid="message-model" className="font-mono text-[10px] text-muted">
+            {[provider, model].filter(Boolean).join(" / ")}
+          </span>
         )}
+        {simulated && <SimulatedBadge />}
+        {message.kind !== "chat" && <span className="font-mono text-[10px] text-muted">{message.kind}</span>}
         <time dateTime={message.created_at} title={t.full} className="text-xs text-muted">
           {t.short}
         </time>
@@ -172,7 +219,79 @@ function MessageRow({ message }: { message: Message }) {
         </span>
       </div>
       <p className="whitespace-pre-wrap break-words">{message.body.text}</p>
+      {usage && (
+        <p data-testid="message-usage" className="mt-0.5 font-mono text-[10px] text-muted">
+          {formatCount(usage.input_tokens)} in, {formatCount(usage.output_tokens)} out ({formatCount(tokens)} tokens)
+          {" · "}
+          {simulated ? "no cost (simulated)" : formatUsd(usage.cost_usd)}
+        </p>
+      )}
     </li>
+  );
+}
+
+function SystemNote({ message }: { message: Message }) {
+  const t = formatTime(message.created_at);
+  const isError = message.kind === "error";
+  return (
+    <li
+      data-testid="message-item"
+      data-message-id={message.id}
+      data-seq={message.seq}
+      data-sender-kind="system"
+      data-note-kind={message.kind}
+      data-correlation-id={message.correlation_id ?? undefined}
+      className={`group my-1 flex gap-2 rounded-md px-2 py-1 text-xs ${
+        isError ? "bg-danger-soft text-danger" : "bg-panel-2/60 text-muted"
+      }`}
+    >
+      <span aria-hidden="true" className="mt-px shrink-0">
+        {isError ? <ErrorIcon /> : <NoteIcon kind={message.kind} />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <span className="font-semibold">{message.sender.display_name}</span>
+          <span className="font-mono text-[10px]">{message.kind}</span>
+          <time dateTime={message.created_at} title={t.full} className="text-[10px]">
+            {t.short}
+          </time>
+          <span className="ml-auto font-mono text-[10px] opacity-0 group-hover:opacity-100">#{message.seq}</span>
+        </div>
+        <p className={`whitespace-pre-wrap break-words ${isError ? "" : "text-fg/80"}`}>{message.body.text}</p>
+      </div>
+    </li>
+  );
+}
+
+function NoteIcon({ kind }: { kind: Message["kind"] }) {
+  if (kind === "task.result") {
+    return (
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <path d="M2.5 6.5l2.2 2.2L9.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (kind === "task.assign") {
+    return (
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <path d="M2 6h7M6.5 3l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <circle cx="6" cy="6" r="4" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M6 4v2.2l1.4 1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ErrorIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M6 3.5v3M6 8.3v.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
   );
 }
 

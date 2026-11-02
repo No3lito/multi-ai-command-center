@@ -1,0 +1,20 @@
+{
+  "_comment": "USD per 1M tokens, standard tier. Verify before relying on them; unknown models are blocked for live calls.",
+  "verified_on": "2026-11-02",
+  "sources": {
+    "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "openai": "https://developers.openai.com/api/docs/pricing"
+  },
+  "models": {
+    "anthropic:claude-opus-5-5": {"input": 4.0, "output": 20.0},
+    "anthropic:claude-sonnet-5-5": {"input": 2.0, "output": 10.0},
+    "anthropic:claude-haiku-5-5": {
+      "input": 0.10, "output": 0.50,
+      "long_context_threshold": 100000, "long_input": 0.50, "long_output": 2.50
+    },
+    "openai:gpt-6-astra": {"input": 10.0, "output": 50.0},
+    "openai:gpt-6.1-sol": {"input": 2.0, "output": 10.0},
+    "openai:gpt-6.1-terra": {"input": 1.0, "output": 5.0},
+    "openai:gpt-6-luna": {"input": 0.10, "output": 0.50}
+  }
+}

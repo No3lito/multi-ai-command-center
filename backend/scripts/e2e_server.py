@@ -36,6 +36,8 @@ def main() -> None:
             ALLOWED_ORIGINS=origin,
             WEB_DIST=str(web_dist),
             WS_HEARTBEAT_SECONDS="2",
+            # Browser tests never spend money: agents use labeled simulated stand-ins.
+            PROVIDER_MODE=os.environ.get("E2E_PROVIDER_MODE", "simulated"),
         )
         subprocess.run(
             [sys.executable, "-m", "command_center.cli", "migrate"], cwd=BACKEND, env=env, check=True

@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, update
+from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -145,10 +147,39 @@ async def _find_by_key(session: AsyncSession, sender_id: str, key: str) -> CCMPM
 async def post_message(
     session: AsyncSession, room_id: str, sender: models.Principal, data: MessageCreateIn
 ) -> PostResult:
+    """Public API path: a chat message from a signed-in human."""
+    return await append_message(
+        session,
+        room_id,
+        sender,
+        kind=data.kind,
+        text=data.body.text,
+        idempotency_key=data.idempotency_key,
+        reply_to=data.reply_to,
+        mentions=list(data.mentions),
+    )
+
+
+async def append_message(
+    session: AsyncSession,
+    room_id: str,
+    sender: models.Principal,
+    *,
+    kind: str,
+    text: str,
+    idempotency_key: str,
+    reply_to: str | None = None,
+    mentions: list[str] | None = None,
+    data: dict[str, Any] | None = None,
+    usage: dict[str, Any] | None = None,
+    correlation_id: str | None = None,
+) -> PostResult:
+    """Append a message to a room: gap-free per-room seq, idempotent per sender and key."""
     # Read plain values up front: a rollback below expires ORM objects, and touching an
     # expired attribute would trigger a lazy load, which is not allowed in async code.
     sender_id = sender.id
-    existing = await _find_by_key(session, sender_id, data.idempotency_key)
+    sender_out = Sender(principal_id=sender.id, kind=sender.kind, display_name=sender.display_name)
+    existing = await _find_by_key(session, sender_id, idempotency_key)
     if existing is not None:
         if existing.room_id != room_id:
             raise ValueError("idempotency_key already used for a different room")
@@ -167,19 +198,21 @@ async def post_message(
         room_id=room_id,
         seq=seq,
         sender_id=sender_id,
-        kind=data.kind,
-        reply_to=data.reply_to,
-        mentions=list(data.mentions),
-        body_text=data.body.text,
-        body_data=None,
-        idempotency_key=data.idempotency_key,
+        kind=kind,
+        reply_to=reply_to,
+        mentions=list(mentions or []),
+        body_text=text,
+        body_data=data,
+        usage=usage,
+        correlation_id=correlation_id,
+        idempotency_key=idempotency_key,
     )
     session.add(msg)
     try:
         await session.flush()
         # Delivered to listeners only when the transaction commits.
         await session.execute(
-            text("SELECT pg_notify(:channel, :payload)"),
+            sql_text("SELECT pg_notify(:channel, :payload)"),
             {"channel": NOTIFY_CHANNEL, "payload": json.dumps({"room_id": room_id, "seq": seq})},
         )
         await session.commit()
@@ -189,11 +222,29 @@ async def post_message(
         if msg in session:
             session.expunge(msg)  # never let autoflush retry the losing insert
         with session.no_autoflush:
-            existing = await _find_by_key(session, sender_id, data.idempotency_key)
+            existing = await _find_by_key(session, sender_id, idempotency_key)
         if existing is None:
             raise
         if existing.room_id != room_id:
             raise ValueError("idempotency_key already used for a different room") from None
         return PostResult(existing, created=False)
     await session.refresh(msg)
-    return PostResult(to_ccmp(msg, sender), created=True)
+    return PostResult(_to_ccmp_with_sender(msg, sender_out), created=True)
+
+
+def _to_ccmp_with_sender(msg: models.Message, sender: Sender) -> CCMPMessage:
+    return CCMPMessage(
+        id=msg.id,
+        seq=msg.seq,
+        room_id=msg.room_id,
+        thread_id=msg.thread_id,
+        sender=sender,
+        kind=msg.kind,
+        reply_to=msg.reply_to,
+        mentions=list(msg.mentions or []),
+        body=Body(text=msg.body_text, data=msg.body_data),
+        task_id=msg.task_id,
+        correlation_id=msg.correlation_id,
+        usage=msg.usage,
+        created_at=msg.created_at,
+    )

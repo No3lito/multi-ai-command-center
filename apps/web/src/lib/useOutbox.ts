@@ -8,6 +8,8 @@ export interface PendingMessage {
   /** Client idempotency key; also the pending item's identity. Reused on retry. */
   key: string;
   text: string;
+  /** Principal ids mentioned in the text; reused on retry. */
+  mentions: string[];
   status: "sending" | "failed";
   error?: string;
   createdAt: string;
@@ -48,13 +50,13 @@ export function useOutbox(
     setPending([]);
   }, [roomId]);
 
-  const dispatch = useCallback(async (key: string, text: string) => {
+  const dispatch = useCallback(async (key: string, text: string, mentions: string[]) => {
     const room = roomRef.current;
     if (!room || inFlight.current.has(key)) return;
     inFlight.current.add(key);
     setPending((prev) => prev.map((p) => (p.key === key ? { ...p, status: "sending", error: undefined } : p)));
     try {
-      const message = await clientRef.current.postMessage(room, text, key);
+      const message = await clientRef.current.postMessage(room, text, key, mentions);
       if (roomRef.current !== room) return;
       deliveredRef.current(message);
       setPending((prev) => prev.filter((p) => p.key !== key));
@@ -68,10 +70,14 @@ export function useOutbox(
   }, []);
 
   const send = useCallback(
-    (text: string) => {
+    (text: string, mentions: readonly string[] = []) => {
       const key = newIdempotencyKey();
-      setPending((prev) => [...prev, { key, text, status: "sending", createdAt: new Date().toISOString() }]);
-      void dispatch(key, text);
+      const ids = [...mentions];
+      setPending((prev) => [
+        ...prev,
+        { key, text, mentions: ids, status: "sending", createdAt: new Date().toISOString() },
+      ]);
+      void dispatch(key, text, ids);
       return key;
     },
     [dispatch],
@@ -80,7 +86,7 @@ export function useOutbox(
   const retry = useCallback(
     (key: string) => {
       const item = pending.find((p) => p.key === key);
-      if (item) void dispatch(item.key, item.text);
+      if (item) void dispatch(item.key, item.text, item.mentions);
     },
     [pending, dispatch],
   );

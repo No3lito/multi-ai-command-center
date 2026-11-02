@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,6 +35,18 @@ class Settings(BaseSettings):
     max_body_bytes: int = 128 * 1024
     enable_api_docs: bool = False
     web_dist: Path = Path(__file__).resolve().parents[2] / "apps" / "web" / "out"
+
+    # ---- AI providers (Milestone B) ----
+    # live: real provider APIs (a missing key fails loudly). simulated: deterministic local
+    # stand-ins, labeled SIMULATED everywhere, no cost. There is never a silent fallback.
+    provider_mode: Literal["live", "simulated"] = "live"
+    anthropic_api_key: SecretStr | None = None
+    openai_api_key: SecretStr | None = None
+    # Instance-wide cap on real API spend, enforced before every paid request.
+    live_budget_usd: float = Field(default=10.0, ge=0, le=1000)
+    run_workers: int = Field(default=2, ge=1, le=16)
+    default_claude_model: str = "claude-sonnet-5-5"
+    default_openai_model: str = "gpt-6.1-sol"
     log_level: str = "INFO"
 
     @field_validator("owner_password")
@@ -63,6 +76,11 @@ class Settings(BaseSettings):
             if host:
                 hosts.add(host)
         return sorted(hosts)
+
+    def api_key_for(self, provider: str) -> str | None:
+        secret = {"anthropic": self.anthropic_api_key, "openai": self.openai_api_key}.get(provider)
+        value = secret.get_secret_value().strip() if secret is not None else ""
+        return value or None
 
     @property
     def asyncpg_dsn(self) -> str:

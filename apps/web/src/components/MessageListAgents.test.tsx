@@ -1,0 +1,48 @@
+import { render, screen, within } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { msg } from "@/test/fakeWebSocket";
+import { agentMsg, coordMsg } from "@/test/fixtures";
+import { MessageList } from "./MessageList";
+
+const renderList = (messages: Parameters<typeof MessageList>[0]["messages"]) =>
+  render(<MessageList messages={messages} pending={[]} loading={false} onRetry={() => {}} onDiscard={() => {}} />);
+
+describe("MessageList with agents", () => {
+  it("shows a SIMULATED badge, provider/model and usage on simulated agent messages", () => {
+    renderList([agentMsg(1)]);
+    const item = screen.getByTestId("message-item");
+    expect(within(item).getByTestId("simulated-badge")).toHaveTextContent(/simulated/i);
+    expect(within(item).getByTestId("message-model")).toHaveTextContent("anthropic / claude-sonnet-5-5");
+    expect(within(item).getByTestId("message-usage")).toHaveTextContent("120 in, 80 out (200 tokens)");
+    expect(within(item).getByTestId("message-usage")).toHaveTextContent("no cost (simulated)");
+  });
+
+  it("shows cost and no badge on live agent messages", () => {
+    renderList([agentMsg(1, { usage: { input_tokens: 10, output_tokens: 5, cost_usd: 0.0123 } }, { simulated: false })]);
+    expect(screen.queryByTestId("simulated-badge")).toBeNull();
+    expect(screen.getByTestId("message-usage")).toHaveTextContent("$0.0123");
+  });
+
+  it("does not badge human messages, even if data claims simulated", () => {
+    const m = msg(1);
+    renderList([{ ...m, body: { text: "hi", data: { simulated: false } } }]);
+    expect(screen.queryByTestId("simulated-badge")).toBeNull();
+    expect(screen.queryByTestId("message-usage")).toBeNull();
+  });
+
+  it("renders coordinator task messages as compact notes and errors as red notes, with safe text", () => {
+    renderList([
+      coordMsg(1, "task.assign", "Claude: write a plan"),
+      coordMsg(2, "task.result", "Run finished <b>ok</b>"),
+      coordMsg(3, "error", "Provider failed"),
+    ]);
+    const items = screen.getAllByTestId("message-item");
+    expect(items[0]).toHaveAttribute("data-note-kind", "task.assign");
+    expect(items[0]).toHaveTextContent("Claude: write a plan");
+    expect(items[1]).toHaveTextContent("Run finished <b>ok</b>");
+    expect(items[1]!.querySelector("b")).toBeNull();
+    expect(items[2]).toHaveAttribute("data-note-kind", "error");
+    expect(items[2]!.className).toContain("bg-danger-soft");
+    expect(items[0]!.className).not.toContain("bg-danger-soft");
+  });
+});

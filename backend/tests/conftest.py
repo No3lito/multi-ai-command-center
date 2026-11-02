@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tests.pg_harness import temporary_postgres
+from tests.pg_harness import create_database, temporary_postgres
 
 BACKEND = Path(__file__).resolve().parents[1]
 PASSWORD = "correct-horse-battery-staple"
@@ -139,3 +140,42 @@ def session_cookie(c: httpx.AsyncClient) -> str:
     value = c.cookies.get("cc_session")
     assert value
     return value
+
+
+@pytest.fixture
+def fresh_database_url(database_url: str) -> str:
+    """An isolated, migrated database, for servers running in a different mode."""
+    url = create_database(database_url, f"cc_{uuid.uuid4().hex[:12]}")
+    subprocess.run(
+        [sys.executable, "-m", "command_center.cli", "migrate"],
+        cwd=BACKEND,
+        env=dict(os.environ, DATABASE_URL=url),
+        check=True,
+        capture_output=True,
+    )
+    return url
+
+
+@contextmanager
+def run_fake_providers(delay: float = 0.0) -> Iterator[str]:
+    port = _free_port()
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "tests.fake_providers", "--port", str(port), "--delay", str(delay)],
+        cwd=BACKEND,
+    )
+    base = f"http://127.0.0.1:{port}"
+    try:
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                if httpx.get(f"{base}/health", timeout=1).status_code == 200:
+                    break
+            except httpx.HTTPError:
+                pass
+            if time.monotonic() > deadline or proc.poll() is not None:
+                raise RuntimeError("fake provider server did not start")
+            time.sleep(0.1)
+        yield base
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)

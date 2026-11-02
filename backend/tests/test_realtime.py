@@ -130,7 +130,7 @@ async def test_delivery_survives_listener_connection_loss(
         try:
             killed = await conn.fetchval(
                 "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity "
-                "WHERE query LIKE 'LISTEN%' AND pid <> pg_backend_pid()"
+                "WHERE application_name = 'cc-realtime-listener' AND datname = current_database()"
             )
         finally:
             await conn.close()
