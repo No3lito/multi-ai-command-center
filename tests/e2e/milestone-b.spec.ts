@@ -87,6 +87,22 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   }
   await expect(messages(page, { senderKind: "system", correlationId: runId! }).getByTestId("simulated-badge")).toHaveCount(0);
 
+  // The brief raised a decision card; answering it records the answer and tells the room.
+  const card = decisions.getByTestId("decision-card");
+  await expect(card).toHaveCount(1, { timeout: 10_000 });
+  await expect(card).toContainText("[Simulated] Example decision");
+  await expect(card.getByTestId("decision-plan")).toContainText("Nothing more runs");
+  await card.getByTestId("decision-add-note").click();
+  await card.getByTestId("decision-note").fill("Looks good");
+  await card.getByTestId("decision-approve").click();
+  await expect(decisions.getByTestId("decision-card")).toHaveCount(0);
+  const decided = decisions.getByTestId("decision-decided-item");
+  await expect(decided).toContainText("Approved");
+  await expect(decided).toContainText("Note: Looks good");
+  await expect(
+    messages(page, { senderKind: "system", correlationId: runId! }).filter({ hasText: "Owner APPROVED" }),
+  ).toHaveCount(1, { timeout: 10_000 });
+
   // Usage: simulated calls counted separately, no real spend.
   const usagePanel = page.getByTestId("usage-panel");
   await expect(usagePanel.getByTestId("usage-spent")).toHaveText("$0.00");

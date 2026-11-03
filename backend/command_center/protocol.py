@@ -200,6 +200,36 @@ class FilesOut(Strict):
     max_chars: int
 
 
+class FollowUpPlanOut(Strict):
+    workflow: str
+    worker: str | None = None
+    goal: str = ""
+
+
+class DecisionOut(Strict):
+    id: str
+    room_id: str
+    run_id: str
+    run_goal: str
+    question: str
+    recommendation: str | None
+    cost: str | None
+    on_approve: FollowUpPlanOut
+    on_more_info: FollowUpPlanOut
+    status: Literal["pending", "approved", "declined", "more_info", "dismissed"]
+    owner_note: str | None
+    decided_at: datetime | None
+    follow_up_run_id: str | None
+    created_at: datetime
+
+
+class DecisionAnswerIn(Strict):
+    answer: Literal["approve", "decline", "more_info", "dismiss"]
+    # Shown to the agents in the follow-up run's goal, e.g. "cap: 50k Helius credits".
+    note: str | None = Field(default=None, max_length=2000)
+    budget_usd: float | None = Field(default=None, gt=0, le=5.0)
+
+
 class ConnectionIn(Strict):
     """An external agent (for example Grok Bot) that connects over MCP with a token."""
 
@@ -278,6 +308,11 @@ class RunOut(Strict):
     created_at: datetime
     updated_at: datetime
     finished_at: datetime | None
+
+
+class DecisionAnswerOut(Strict):
+    decision: DecisionOut
+    follow_up_run: RunOut | None
 
 
 class UsageRow(Strict):

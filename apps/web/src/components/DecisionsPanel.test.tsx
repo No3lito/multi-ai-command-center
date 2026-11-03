@@ -1,8 +1,29 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { Decision } from "@/lib/types";
 import { run } from "@/test/fixtures";
-import { DecisionsPanel, bottomLine } from "./DecisionsPanel";
+import { DecisionsPanel, bottomLine, describePlan } from "./DecisionsPanel";
+
+function decision(over: Partial<Decision> = {}): Decision {
+  return {
+    id: `dec_${"a".repeat(32)}`,
+    room_id: "room_x",
+    run_id: `run_${"1".repeat(32)}`,
+    run_goal: "Review",
+    question: "Approve the capped Helius coverage audit?",
+    recommendation: "Approve: it decides whether H123 can be tested.",
+    cost: "about 50k Helius credits",
+    on_approve: { workflow: "review", worker: "Grok Bot", goal: "Run the audit." },
+    on_more_info: { workflow: "collab", worker: null, goal: "" },
+    status: "pending",
+    owner_note: null,
+    decided_at: null,
+    follow_up_run_id: null,
+    created_at: "2026-11-02T12:00:00Z",
+    ...over,
+  };
+}
 
 const BRIEF = `**Bottom line:** No edge at a 5-second delay; three clean retests are justified.
 **Decided:**
@@ -50,5 +71,79 @@ describe("DecisionsPanel", () => {
   it("says plainly when nothing is waiting", () => {
     render(<DecisionsPanel runs={[run({ brief: "**Bottom line:** Done.", pending_decisions: [] })]} />);
     expect(screen.getByTestId("decision-waiting")).toHaveTextContent("Nothing. No decision is needed");
+  });
+});
+
+describe("describePlan", () => {
+  it("names the worker for review and build", () =>
+    expect(describePlan({ workflow: "review", worker: "Grok Bot", goal: "" })).toBe(
+      "Grok Bot does the work, then Claude and GPT check it.",
+    ));
+  it("says nothing more runs for none", () =>
+    expect(describePlan({ workflow: "none", worker: null, goal: "" })).toMatch(/^Nothing more runs/));
+});
+
+describe("decision cards", () => {
+  const briefed = run({ brief: "**Bottom line:** Retest H123.", pending_decisions: ["old bullet"] });
+
+  it("shows a card per pending decision instead of the bullet list", () => {
+    render(<DecisionsPanel runs={[briefed]} decisions={[decision()]} onAnswer={vi.fn()} />);
+    const card = screen.getByTestId("decision-card");
+    expect(card).toHaveTextContent("Approve the capped Helius coverage audit?");
+    expect(screen.getByTestId("decision-recommendation")).toHaveTextContent("Recommended: Approve");
+    expect(screen.getByTestId("decision-cost")).toHaveTextContent("about 50k Helius credits");
+    expect(screen.getByTestId("decision-plan")).toHaveTextContent("If approved: Grok Bot does the work");
+    expect(screen.queryByTestId("decision-item")).not.toBeInTheDocument();
+  });
+
+  it("approves with a note and budget in one click", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn().mockResolvedValue({});
+    render(<DecisionsPanel runs={[briefed]} decisions={[decision()]} onAnswer={onAnswer} />);
+    await user.click(screen.getByTestId("decision-add-note"));
+    await user.type(screen.getByTestId("decision-note"), "cap 50k credits");
+    await user.type(screen.getByTestId("decision-budget"), "0.4");
+    await user.click(screen.getByTestId("decision-approve"));
+    expect(onAnswer).toHaveBeenCalledWith(`dec_${"a".repeat(32)}`, {
+      answer: "approve",
+      note: "cap 50k credits",
+      budget_usd: 0.4,
+    });
+  });
+
+  it("declines without sending a budget, and blocks a bad budget", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn().mockResolvedValue({});
+    render(<DecisionsPanel runs={[briefed]} decisions={[decision()]} onAnswer={onAnswer} />);
+    await user.click(screen.getByTestId("decision-add-note"));
+    await user.type(screen.getByTestId("decision-budget"), "9");
+    expect(screen.getByTestId("decision-approve")).toBeDisabled();
+    await user.click(screen.getByTestId("decision-decline"));
+    expect(onAnswer).toHaveBeenCalledWith(`dec_${"a".repeat(32)}`, { answer: "decline" });
+  });
+
+  it("shows the server's error on the card", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi
+      .fn()
+      .mockRejectedValue({ status: 409, code: "x", message: "This decision was already approved" });
+    render(<DecisionsPanel runs={[briefed]} decisions={[decision()]} onAnswer={onAnswer} />);
+    await user.click(screen.getByTestId("decision-more-info"));
+    expect(await screen.findByText(/already approved|Could not save/)).toBeInTheDocument();
+  });
+
+  it("lists recently decided items with notes and follow-ups", () => {
+    const done = decision({
+      id: `dec_${"b".repeat(32)}`,
+      status: "approved",
+      owner_note: "cap 50k",
+      follow_up_run_id: `run_${"9".repeat(32)}`,
+    });
+    render(<DecisionsPanel runs={[briefed]} decisions={[done]} onAnswer={vi.fn()} />);
+    expect(screen.getByTestId("decision-waiting")).toHaveTextContent("Nothing. No decision is needed");
+    const item = screen.getByTestId("decision-decided-item");
+    expect(item).toHaveTextContent("Approved");
+    expect(item).toHaveTextContent("Note: cap 50k");
+    expect(item).toHaveTextContent("Follow-up run started");
   });
 });

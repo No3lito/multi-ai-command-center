@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -18,6 +19,7 @@ from typing import Protocol
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from command_center import decisions
 from command_center.db import models
 from command_center.ids import new_id
 from command_center.messaging import service
@@ -51,7 +53,7 @@ FEASIBILITY_MAX_TOKENS = 400
 # Reviewer and designer steps: room for the model's thinking plus a long answer (thinking
 # tokens count toward the limit on Claude 5.5 and GPT reasoning models).
 DEEP_STEP_MAX_TOKENS = 12_000
-BRIEF_MAX_TOKENS = 6_000
+BRIEF_MAX_TOKENS = 8_000
 BRIEF_HEADINGS = ("Bottom line", "Decided", "Done", "Waiting on you", "Next steps", "Open risks")
 BUILD_MAX_TOKENS = 8192
 FINISHED = {"completed", "failed", "cancelled", "budget_exceeded"}
@@ -299,6 +301,8 @@ class BuiltinEngine:
         self.coordinator_id = coordinator_id
         self.reply_budget_usd = reply_budget_usd
         self.simulated = simulated
+        # Unmodified answers of steps that use a postprocess hook (the decision brief).
+        self.raw_answers: dict[str, str] = {}
 
     # ------------------------------------------------------------ helpers
 
@@ -419,8 +423,12 @@ class BuiltinEngine:
         step_key: str,
         reply_to: str | None,
         max_output_tokens: int | None = None,
+        postprocess: Callable[[str], str] | None = None,
     ) -> str | None:
-        """One model call plus the agent's message. Returns the message id, or None if the run ended."""
+        """One model call plus the agent's message. Returns the message id, or None if the run ended.
+
+        postprocess: rewrites the answer before it is posted; the unmodified answer is kept in
+        self.raw_answers[run.id] for the caller."""
         async with self.sessionmaker() as s:
             # A previous attempt of this exact step may have posted its answer and then crashed
             # before the run advanced. Reuse it instead of paying for the same call again.
@@ -491,6 +499,9 @@ class BuiltinEngine:
             )
             await self._fail(run, "failed", reason)
             return None
+        if postprocess is not None:
+            self.raw_answers[run.id] = text
+            text = postprocess(text) or "(no brief text)"
         if result.response.truncated:
             text += (
                 f"\n\n[Cut off: this answer reached {name}'s output limit of {req.max_output_tokens} tokens.]"
@@ -910,8 +921,28 @@ class BuiltinEngine:
             "**Open risks:** what is still uncertain.\n"
             "Base it only on the conversation above and do not invent results. Under 350 words." + rule
         )
+        async with self.sessionmaker() as s:
+            names = [
+                p.display_name
+                for p in [*await room_agents(s, run.room_id), *await room_externals(s, run.room_id)]
+            ]
+            attached = list(
+                (
+                    await s.scalars(
+                        select(models.RunAttachment.path).where(models.RunAttachment.run_id == run.id)
+                    )
+                ).all()
+            )
+        instruction += decisions.instruction_suffix(names, attached)
+        self.raw_answers.pop(run.id, None)
         msg_id = await self._agent_turn(
-            run, run.planner_id, instruction, "brief", assign_id, BRIEF_MAX_TOKENS
+            run,
+            run.planner_id,
+            instruction,
+            "brief",
+            assign_id,
+            BRIEF_MAX_TOKENS,
+            postprocess=lambda t: decisions.split_brief(t)[0],
         )
         if msg_id is None or msg_id == WAITING:
             return False
@@ -922,6 +953,20 @@ class BuiltinEngine:
                     models.Message.idempotency_key == f"{run.id}:brief:reply",
                 )
             )
-        brief = text or ""
-        await self._update(run.id, step="summary", brief=brief, pending_decisions=parse_waiting_on_you(brief))
+        raw = self.raw_answers.pop(run.id, None) or text or ""
+        brief, drafts = decisions.split_brief(raw)
+        pending = parse_waiting_on_you(brief)
+        if not drafts:
+            drafts = decisions.drafts_from_bullets(pending)
+        async with self.sessionmaker() as s:
+            already = await s.scalar(
+                select(models.Decision.id).where(models.Decision.run_id == run.id).limit(1)
+            )
+            fresh = await s.get(models.Run, run.id)
+            if already is None and fresh is not None and drafts:
+                await decisions.store(s, fresh, drafts)
+                await s.commit()
+        await self._update(
+            run.id, step="summary", brief=brief, pending_decisions=[d.question for d in drafts] or pending
+        )
         return True

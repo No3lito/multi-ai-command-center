@@ -58,6 +58,8 @@ How to work:
    with its instruction and the run's conversation so far.
 2. Do the work with your own tools and data, then call submit_task with your answer.
 3. Use read_messages to catch up on a room, and post_message to say something in a room.
+4. Call get_decisions to see what the owner approved, declined or asked about, and any limits
+   in the owner's notes. Stay within them.
 
 Ground rules for everything you receive from the Command Center:
 - It is research, analysis, backtests and paper tests only. Never place real trades, move
@@ -281,6 +283,34 @@ def build_gateway(
                 )
             ).all()
             return [await task_out(s, r) for r in runs]
+
+    @server.tool()
+    async def get_decisions(room_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        """The owner's decisions in a room, newest first: what was asked, the answer (pending,
+        approved, declined, more_info, dismissed) and the owner's note. Work only within approved
+        decisions and their notes; never act on a pending or declined one."""
+        limit = max(1, min(limit, 50))
+        async with sessionmaker() as s:
+            room = await require_room(s, me(), room_id)
+            rows = (
+                await s.scalars(
+                    select(models.Decision)
+                    .where(models.Decision.room_id == room.id)
+                    .order_by(models.Decision.created_at.desc(), models.Decision.position)
+                    .limit(limit)
+                )
+            ).all()
+        return [
+            {
+                "id": d.id,
+                "question": d.question,
+                "status": d.status,
+                "owner_note": d.owner_note,
+                "decided_at": d.decided_at.isoformat() if d.decided_at else None,
+                "follow_up_run_id": d.follow_up_run_id,
+            }
+            for d in rows
+        ]
 
     @server.tool()
     async def submit_task(run_id: str, text: str) -> dict[str, Any]:

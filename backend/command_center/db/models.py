@@ -288,3 +288,36 @@ class RunAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("run_attachments_by_run", "run_id"),)
+
+
+class Decision(Base):
+    """A decision only the owner can make, raised by a run's decision brief.
+
+    The agents prepare what happens next for each answer (follow_up); the owner answers on
+    the dashboard, and approving or asking for more information starts that run.
+    """
+
+    __tablename__ = "decisions"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    room_id: Mapped[str] = mapped_column(ForeignKey("rooms.id", ondelete="CASCADE"))
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    question: Mapped[str] = mapped_column(Text)
+    recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cost: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # {"on_approve": {"workflow", "worker", "goal", "attachments"}, "on_more_info": {"goal"}}
+    follow_up: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    owner_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(ForeignKey("principals.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    follow_up_run_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('pending','approved','declined','more_info','dismissed')", name="decision_status"
+        ),
+        Index("decisions_by_room", "room_id", "status", "created_at"),
+    )

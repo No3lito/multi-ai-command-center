@@ -2,6 +2,9 @@ import type {
   Agent,
   AgentIn,
   CreateRunBody,
+  Decision,
+  DecisionAnswerBody,
+  DecisionAnswerResult,
   Message,
   MessagePage,
   PostMessageBody,
@@ -188,6 +191,11 @@ export const api = {
     request<Run[]>(`/api/rooms/${enc(roomId)}/runs?limit=${limit}`, { signal }),
   getRun: (runId: string, signal?: AbortSignal) => request<Run>(`/api/runs/${enc(runId)}`, { signal }),
   cancelRun: (runId: string) => request<Run>(`/api/runs/${enc(runId)}/cancel`, { method: "POST" }),
+
+  listDecisions: (roomId: string, signal?: AbortSignal) =>
+    request<Decision[]>(`/api/rooms/${enc(roomId)}/decisions?status=all&limit=50`, { signal }),
+  answerDecision: (decisionId: string, body: DecisionAnswerBody) =>
+    request<DecisionAnswerResult>(`/api/decisions/${enc(decisionId)}/answer`, { method: "POST", body }),
 
   listFiles: (path = "", signal?: AbortSignal) =>
     request<FilesListing>(`/api/files?path=${encodeURIComponent(path)}`, { signal }),

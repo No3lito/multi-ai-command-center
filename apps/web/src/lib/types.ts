@@ -156,6 +156,45 @@ export interface Run {
 
 export type RunWorkflow = "collab" | "build" | "review";
 
+/** What the agents prepared to run when the owner answers a decision. */
+export interface FollowUpPlan {
+  workflow: RunWorkflow | "none" | string;
+  worker: string | null;
+  goal: string;
+}
+
+export type DecisionStatus = "pending" | "approved" | "declined" | "more_info" | "dismissed";
+export type DecisionAnswer = "approve" | "decline" | "more_info" | "dismiss";
+
+/** A decision raised by a run's brief, answered by the owner on the dashboard. */
+export interface Decision {
+  id: string;
+  room_id: string;
+  run_id: string;
+  run_goal: string;
+  question: string;
+  recommendation: string | null;
+  cost: string | null;
+  on_approve: FollowUpPlan;
+  on_more_info: FollowUpPlan;
+  status: DecisionStatus;
+  owner_note: string | null;
+  decided_at: string | null;
+  follow_up_run_id: string | null;
+  created_at: string;
+}
+
+export interface DecisionAnswerBody {
+  answer: DecisionAnswer;
+  note?: string;
+  budget_usd?: number;
+}
+
+export interface DecisionAnswerResult {
+  decision: Decision;
+  follow_up_run: Run | null;
+}
+
 /** An external agent (for example Grok Bot) connected over MCP with a token. */
 export interface Connection {
   id: string;

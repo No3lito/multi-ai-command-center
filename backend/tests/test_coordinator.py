@@ -94,7 +94,9 @@ async def test_simulated_collab_run_end_to_end(sim_server: Server) -> None:
         done = await wait_run(c, run["id"])
         assert done["status"] == "completed", done
         assert done["turn_count"] == 4 and done["step"] == "done" and done["spent_usd"] == 0
-        assert done["brief"] and done["pending_decisions"] == [], "simulated brief, nothing pending"
+        assert done["brief"] and done["pending_decisions"] == [
+            "[Simulated] Example decision: approve this to try the buttons."
+        ], "simulated brief raises one labelled example decision"
         msgs = await run_messages(c, room_id, run["id"])
         assert [m["kind"] for m in msgs] == [
             "task.assign",
