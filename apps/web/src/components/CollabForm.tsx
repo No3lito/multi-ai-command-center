@@ -76,6 +76,8 @@ interface Props {
   suggestFiles?: (goal: string, signal?: AbortSignal) => Promise<FileSuggestions>;
   /** Wait this long after typing before suggesting (ms). */
   suggestDelayMs?: number;
+  /** The room's project folder: the file browser opens there. */
+  projectPath?: string | null;
 }
 
 export function CollabForm({
@@ -88,6 +90,7 @@ export function CollabForm({
   projectTitle = null,
   suggestFiles,
   suggestDelayMs = 600,
+  projectPath = null,
 }: Props) {
   const usable = roomAgents.filter((r) => r.agent && isAgentUsable(r.agent));
   const [goal, setGoal] = useState("");
@@ -334,7 +337,14 @@ export function CollabForm({
             Always included: {always.map((p) => p.split("/").pop()).join(", ")}
           </p>
         )}
-        {listFiles && <AttachmentsPicker listFiles={listFiles} selected={attached} onChange={changeAttached} />}
+        {listFiles && (
+          <AttachmentsPicker
+            listFiles={listFiles}
+            selected={attached}
+            onChange={changeAttached}
+            startPath={projectPath ?? ""}
+          />
+        )}
         <label className="flex items-center gap-2 text-[11px] text-muted">
           <input
             type="checkbox"
