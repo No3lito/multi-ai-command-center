@@ -571,6 +571,11 @@ async def test_send_it_back_continues_the_same_pull_request(world: dict[str, Any
             if not await engine.step(job.id):
                 break
     assert "Also add a test for negatives" in adapter.prompts[0][1]
+    review_prompt = next(p for k, p in adapter.prompts if k == "review")
+    assert (
+        "The owner sent this pull request back" in review_prompt
+        and "Also add a test for negatives" in review_prompt
+    )
     assert len(repo.prs) == 1  # same pull request, new commit on the same branch
     files = repo.commits[repo.branches[first.code_state["branch"]]]["files"]  # type: ignore[index]
     assert "assert add(-1, 1) == 0" in files["tests/test_calc.py"] and "a + b" in files["app/calc.py"]
@@ -710,3 +715,22 @@ async def test_try_again_restarts_a_failed_code_job(fresh_database_url: str, tmp
                 "code"
             ] == "run_not_finished"
             await c.post(f"/api/runs/{again['id']}/cancel")
+
+
+def test_key_errors_pick_the_real_failure_out_of_a_noisy_log() -> None:
+    log = "\n".join(
+        [
+            'postgres: FATAL:  database "cc" does not exist',
+            "  ✓  8 milestone-b.spec.ts:334:5 \u203a new project in two clicks (1.5s)",
+            "  ✘  9 milestone-b.spec.ts:351:5 \u203a phone width: readable text (946ms)",
+            "    Error: expect(received).toBe(expected) // Object.is equality",
+            '    Expected: "16px"',
+            '    Received: "15px"',
+            "      at /home/runner/work/tests/e2e/milestone-b.spec.ts:360:5",
+            "##[error]Process completed with exit code 1.",
+        ]
+        + ['postgres: FATAL:  database "cc" does not exist'] * 50
+    )
+    found = code_jobs.key_errors(log)
+    assert "phone width" in found and 'Expected: "16px"' in found and 'Received: "15px"' in found
+    assert "does not exist" not in found and "##[error]" not in found and " at /home" not in found
