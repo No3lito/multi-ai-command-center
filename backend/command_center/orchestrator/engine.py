@@ -1159,7 +1159,7 @@ class BuiltinEngine:
             executors = decisions.describe_executors(
                 roster,
                 externals,
-                code_repo=self.models.settings.code_repo if self.github() is not None else None,
+                code_repo=self.models.settings.code_repo if self.models.settings.code_jobs_enabled else None,
             )
             attached = list(
                 (

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from pydantic import SecretStr
 from sqlalchemy import select
 
 from command_center import code_jobs, decisions
@@ -45,7 +46,8 @@ def test_edits_modify_create_and_delete() -> None:
         ("app/new.py", False),
         ("README.md", True),
     ]
-    out = apply_edits({"app/calc.py": SAMPLE_FILES["app/calc.py"]}, set(SAMPLE_FILES), edits)
+    shown = {p: SAMPLE_FILES[p] for p in ("app/calc.py", "README.md")}
+    out = apply_edits(shown, set(SAMPLE_FILES), edits)
     assert out.errors == []
     assert out.files == {
         "app/calc.py": "def add(a, b):\n    return a + b\n",
@@ -53,6 +55,51 @@ def test_edits_modify_create_and_delete() -> None:
         "README.md": None,
     }
     assert code_jobs.strip_edits(text) == "Fixed the sign."
+
+
+def test_paths_agents_may_never_change() -> None:
+    for path in [
+        "./.github/workflows/ci.yml",
+        ".GitHub/workflows/ci.yml",
+        ".github",
+        "a//b.py",
+        "a/./b.py",
+        ".git/config",
+        "x/.git/hooks/pre-commit",
+        "CODEOWNERS",
+        "docs/CODEOWNERS",
+        "app/ca\u200blc.py",
+        "app/calc.py\n",
+        "backend/.env.local",
+        "certs/server.pem",
+    ]:
+        assert code_jobs.blocked_reason(path), path
+    for path in ["app/calc.py", ".env.example", "docs/github-notes.md", "apps/web/src/a.tsx"]:
+        assert code_jobs.blocked_reason(path) is None, path
+
+
+def test_commit_text_cannot_switch_ci_off() -> None:
+    for text in ["Fix it [skip ci]", "Fix [ci skip] now", "x [no ci]", "[skip actions] y", "***NO_CI*** z"]:
+        cleaned = code_jobs.no_skip_ci(text)
+        assert "skip" not in cleaned.lower() and "no_ci" not in cleaned.lower() and "[no ci]" not in cleaned
+
+
+def test_a_pull_request_is_merged_only_as_reviewed() -> None:
+    pr = {
+        "state": "open",
+        "merged": False,
+        "head": {"ref": "agent/command-center/x-1", "sha": "abc"},
+        "base": {"ref": "main"},
+    }
+    assert code_jobs.check_pr_for_merge(pr, "abc", "main") is None
+    assert "changed after the review" in (code_jobs.check_pr_for_merge(pr, "old", "main") or "")
+    assert "not a code job branch" in (
+        code_jobs.check_pr_for_merge({**pr, "head": {"ref": "feature/x", "sha": "abc"}}, "abc", "main") or ""
+    )
+    assert "does not target" in (
+        code_jobs.check_pr_for_merge({**pr, "base": {"ref": "dev"}}, "abc", "main") or ""
+    )
+    assert "no longer open" in (code_jobs.check_pr_for_merge({**pr, "state": "closed"}, "abc", "main") or "")
 
 
 def test_edits_that_cannot_apply_say_why() -> None:
@@ -73,6 +120,7 @@ def test_edits_that_cannot_apply_say_why() -> None:
         "not shown" in errors("FILE: README.md\n<<<<<<< SEARCH\n# Sample\n=======\n# B\n>>>>>>> REPLACE")[0]
     )
     assert "inside the repository" in errors("FILE: ../x.py\n<<<<<<< SEARCH\n=======\nx\n>>>>>>> REPLACE")[0]
+    assert "cannot delete" in errors("DELETE: README.md")[0]  # exists, but the writer never saw it
     assert code_jobs.blocked_reason(".env.example") is None
 
 
@@ -82,6 +130,10 @@ def test_small_parsers() -> None:
         "tests/test_calc.py",
     ]
     assert parse_files("no block") == []
+    assert parse_files('```files\n[".env.example", "./.github/workflows/ci.yml", "app/x.py"]\n```') == [
+        ".env.example",
+        "app/x.py",
+    ]
     assert parse_review("1. Fix it.\nVERDICT: CHANGES") == "changes"
     assert parse_review("Looks right.\n**VERDICT: APPROVE**") == "approve"
     assert parse_review("no verdict") == "changes"
@@ -165,14 +217,16 @@ async def code_job(
             w,
             kind="code",
             step="scope",
-            goal="Fix add() so it adds",
             planner_id=w["agents"]["Claude"].id,
             critic_id=w["agents"]["GPT"].id,
             agent_id=None,
-            max_turns=8,
-            budget_usd=Decimal("3.00"),
-            write_brief=False,
-            **run,
+            **{
+                "max_turns": 8,
+                "budget_usd": Decimal("3.00"),
+                "write_brief": False,
+                "goal": "Fix add() so it adds",
+                **run,
+            },
         )
         for _ in range(40):
             if not await engine.step(job.id):
@@ -314,19 +368,31 @@ def run_fake_github() -> Iterator[str]:
         proc.wait(timeout=10)
 
 
-async def open_fake_pr(base: str, n: int) -> None:
+async def open_fake_pr(base: str, n: int) -> str:
+    """A pull request on the fake GitHub; returns its head commit (the reviewed one)."""
     gh = GitHub(TOKEN, REPO, api_url=base)
     try:
         main = await gh.branch_sha("main")
         assert main is not None
         branch = f"agent/command-center/change-{n}"
-        await gh.commit(branch, main, {"app/calc.py": f"# change {n}\n"}, f"change {n}")
+        sha = await gh.commit(branch, main, {"app/calc.py": f"# change {n}\n"}, f"change {n}")
         await gh.open_pr(branch, "main", f"[Claude + GPT] change {n}", "test")
+        return sha
     finally:
         await gh.aclose()
 
 
-async def card_for_pr(url: str, n: int, room_id: str, owner_id: str, writer: str, reviewer: str) -> str:
+async def push_more(base: str, n: int, head: str) -> None:
+    gh = GitHub(TOKEN, REPO, api_url=base)
+    try:
+        await gh.commit(f"agent/command-center/change-{n}", head, {"app/calc.py": "# unreviewed\n"}, "later")
+    finally:
+        await gh.aclose()
+
+
+async def card_for_pr(
+    url: str, n: int, room_id: str, owner_id: str, writer: str, reviewer: str, head_sha: str
+) -> str:
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     eng = create_async_engine(url.replace("postgresql://", "postgresql+asyncpg://", 1))
@@ -346,7 +412,7 @@ async def card_for_pr(url: str, n: int, room_id: str, owner_id: str, writer: str
                 models.Decision(
                     id=dec_id, room_id=room_id, run_id=run_id, question=f"Merge pull request #{n}?",
                     follow_up={"code_pr": {"number": n, "url": f"https://github.com/{REPO}/pull/{n}",
-                                           "title": "t"},
+                                           "title": "t", "head_sha": head_sha, "base": "main"},
                                "on_approve": {"workflow": "none"}, "on_more_info": {"workflow": "code"}},
                     status="pending",
                 )
@@ -374,24 +440,39 @@ async def test_owner_approves_to_merge_and_declines_to_close(fresh_database_url:
                 room_id = next(r["id"] for r in rooms if r["name"] == "General")
                 me = (await c.get("/api/auth/me")).json()
                 agents = {a["display_name"]: a for a in (await c.get("/api/agents")).json()}
-                await open_fake_pr(gh_base, 1)
-                await open_fake_pr(gh_base, 2)
-                ids = [
-                    await card_for_pr(
-                        fresh_database_url, n, room_id, me["id"], agents["Claude"]["id"], agents["GPT"]["id"]
+                heads = {n: await open_fake_pr(gh_base, n) for n in (1, 2, 3)}
+                ids = {
+                    n: await card_for_pr(
+                        fresh_database_url,
+                        n,
+                        room_id,
+                        me["id"],
+                        agents["Claude"]["id"],
+                        agents["GPT"]["id"],
+                        heads[n],
                     )
-                    for n in (1, 2)
-                ]
+                    for n in (1, 2, 3)
+                }
                 cards = (await c.get(f"/api/rooms/{room_id}/decisions")).json()
-                assert {d["code_pr"]["number"] for d in cards if d["code_pr"]} == {1, 2}
-                r = await c.post(f"/api/decisions/{ids[0]}/answer", json={"answer": "approve"})
+                assert {d["code_pr"]["number"] for d in cards if d["code_pr"]} == {1, 2, 3}
+                r = await c.post(f"/api/decisions/{ids[1]}/answer", json={"answer": "approve"})
                 assert r.status_code == 200, r.text
                 assert "Merged pull request #1" in r.json()["code_result"]
-                r = await c.post(f"/api/decisions/{ids[1]}/answer", json={"answer": "decline"})
+                r = await c.post(f"/api/decisions/{ids[2]}/answer", json={"answer": "decline"})
                 assert "Closed pull request #2" in r.json()["code_result"]
+                # Someone pushed to #3 after the review: approving must not merge unreviewed code.
+                await push_more(gh_base, 3, heads[3])
+                r = await c.post(f"/api/decisions/{ids[3]}/answer", json={"answer": "approve"})
+                assert r.status_code == 409 and r.json()["error"]["code"] == "merge_refused", r.text
+                assert "changed after the review" in r.json()["error"]["message"]
+                pending = (
+                    await c.get(f"/api/rooms/{room_id}/decisions", params={"status": "pending"})
+                ).json()
+                assert [d["id"] for d in pending] == [ids[3]]
                 async with httpx.AsyncClient() as raw:
                     state = (await raw.get(f"{gh_base}/_state")).json()
                 assert state["prs"]["1"]["merged"] is True and state["prs"]["2"]["state"] == "closed"
+                assert state["prs"]["3"]["merged"] is False
                 assert state["main_files"]["app/calc.py"] == "# change 1\n"
                 # A new code job from the dashboard gets the job budget and starts by picking files.
                 run = await c.post(
@@ -424,3 +505,74 @@ async def test_code_jobs_are_off_without_a_token(client: httpx.AsyncClient) -> N
         },
     )
     assert r.status_code == 409 and r.json()["error"]["code"] == "code_jobs_off"
+
+
+async def test_no_ci_means_unverified_and_skip_ci_is_stripped(
+    world: dict[str, Any],  # noqa: F811
+    monkeypatch: Any,
+) -> None:
+    """A goal saying [skip ci] cannot switch the tests off, and a commit with no CI run is never
+    presented as tested."""
+    from command_center.orchestrator import code_steps
+
+    monkeypatch.setattr(code_steps, "CI_START_GRACE_SECONDS", 0)
+    repo = FakeRepo(SAMPLE_FILES, ci=["none"])
+    adapter = Scripted(writes=[FIX_SIGN], reviews=["Fine.\nVERDICT: APPROVE"])
+    run, _ = await code_job(world, adapter, repo, goal="Fix add() [skip ci]")
+    assert run.status == "completed"
+    head = repo.branches[run.code_state["branch"]]  # type: ignore[index]
+    assert "skip ci" not in repo.commits[head]["message"].lower()
+    assert "skip ci" not in repo.prs[1]["title"].lower()
+    async with world["sm"]() as s:
+        card = await s.scalar(select(models.Decision).where(models.Decision.run_id == run.id))
+    assert card is not None and card.recommended != "approve"
+    assert "not verified" in (card.why or "")
+
+
+async def test_edits_failing_in_the_last_round_still_end_with_a_card(world: dict[str, Any]) -> None:  # noqa: F811
+    repo = FakeRepo(SAMPLE_FILES)
+    bad = "FILE: app/calc.py\n<<<<<<< SEARCH\nnot in the file\n=======\nx\n>>>>>>> REPLACE"
+    adapter = Scripted(writes=[FIX_SIGN, bad, bad], reviews=["1. Add a test.\nVERDICT: CHANGES"])
+    run, msgs = await code_job(world, adapter, repo)
+    assert run.status == "completed", run.error
+    assert any("after the last round" in m.body_text for m in msgs)
+    async with world["sm"]() as s:
+        card = await s.scalar(select(models.Decision).where(models.Decision.run_id == run.id))
+    assert card is not None and card.follow_up["code_pr"]["number"] == 1 and card.recommended == "more_info"
+
+
+async def test_send_it_back_continues_the_same_pull_request(world: dict[str, Any]) -> None:  # noqa: F811
+    repo = FakeRepo(SAMPLE_FILES)
+    first, _ = await code_job(world, Scripted(writes=[FIX_SIGN], reviews=["Good.\nVERDICT: APPROVE"]), repo)
+    async with world["sm"]() as s:
+        card = await s.scalar(select(models.Decision).where(models.Decision.run_id == first.id))
+        assert card is not None
+        follow = await decisions.start_follow_up(
+            s, cfg(world["url"], github_token=SecretStr("t")), card, answer="more_info",
+            note="Also add a test for negatives. Keep it under $1.00.", owner_id=world["owner"].id,
+            budget_usd=None,
+        )  # fmt: skip
+        await s.commit()
+    job = follow.run
+    assert job is not None and (job.kind, job.step, job.budget_usd) == ("code", "fix", Decimal("1.00"))
+    assert (job.planner_id, job.critic_id) == (first.planner_id, first.critic_id)
+    adapter = Scripted(writes=[ADD_TEST], reviews=["Good.\nVERDICT: APPROVE"])
+    port = await port_for(world["sm"], cfg(world["url"]), adapter)
+    with fake_github(repo) as gh:
+        engine = BuiltinEngine(world["sm"], port, world["coordinator"], Decimal("0.25"), simulated=False,
+                               github=gh,
+                               code_ci_wait_seconds=5, code_ci_poll_seconds=0.01)  # fmt: skip
+        for _ in range(20):
+            if not await engine.step(job.id):
+                break
+    assert "Also add a test for negatives" in adapter.prompts[0][1]
+    assert len(repo.prs) == 1  # same pull request, new commit on the same branch
+    files = repo.commits[repo.branches[first.code_state["branch"]]]["files"]  # type: ignore[index]
+    assert "assert add(-1, 1) == 0" in files["tests/test_calc.py"] and "a + b" in files["app/calc.py"]
+
+
+async def test_a_code_job_stops_when_its_budget_is_used(world: dict[str, Any]) -> None:  # noqa: F811
+    repo = FakeRepo(SAMPLE_FILES)
+    run, _ = await code_job(world, Scripted([FIX_SIGN], []), repo, budget_usd=Decimal("0.05"))
+    assert run.status == "budget_exceeded" and "No request was sent" in (run.error or "")
+    assert len(repo.prs) == 0

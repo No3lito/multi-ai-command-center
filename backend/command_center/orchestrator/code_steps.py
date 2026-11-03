@@ -57,11 +57,10 @@ def parse_files(text: str) -> list[str]:
         raw = json.loads(m.group(1))
     except json.JSONDecodeError:
         return []
-    return (
-        [str(p).strip().lstrip("./") for p in raw if isinstance(p, str) and p.strip()]
-        if isinstance(raw, list)
-        else []
-    )
+    if not isinstance(raw, list):
+        return []
+    paths = [str(p).strip().removeprefix("./") for p in raw if isinstance(p, str) and p.strip()]
+    return [p for p in paths if code_jobs.blocked_reason(p) is None]
 
 
 def parse_review(text: str) -> str:
@@ -274,12 +273,18 @@ class CodeSteps:
         )
         if msg is None or msg == "__waiting__":
             return False
+        key = f"{run.step}{rnd}"
         raw = self.e.raw_answers.pop(run.id, None)
-        if raw is None:
-            await self.e._fail(
-                run, "failed", "This step was interrupted after the answer arrived. Start the code job again."
+        if raw is not None:
+            # Keep the answer durably, so a restart before the commit does not lose (or re-buy) it.
+            state["last_answer"] = {"key": key, "text": raw}
+            await self._save(run, state)
+        elif (state.get("last_answer") or {}).get("key") == key:
+            raw = str(state["last_answer"]["text"])
+        else:
+            return await self._stop(
+                run, state, "This step was interrupted after the answer arrived. Start the code job again."
             )
-            return False
         edits = code_jobs.parse_edits(raw)
         if not edits:
             if fixing and state.get("pr"):
@@ -302,23 +307,24 @@ class CodeSteps:
                 )
                 await self._save(run, state, step="fix")
                 return True
-            await self.e._fail(
+            return await self._stop(
                 run,
-                "failed",
+                state,
                 "The edits could not be applied after the last round:\n- " + "\n- ".join(errors[:8]),
             )
-            return False
         state.pop("apply_errors", None)
         branch = state.get("branch") or code_jobs.branch_name(run.goal, run.id)
         parent = state.get("head_sha") or state["base_sha"]
-        first_line = re.sub(r"\s+", " ", run.goal).strip()[:60]
+        first_line = code_jobs.no_skip_ci(re.sub(r"\s+", " ", run.goal)).strip()[:60]
         title = f"{'Fix review findings' if fixing else first_line}"
         sha = await self.gh.commit(
             branch,
             parent,
             applied.files,
-            f"{title}\n\nWritten by {writer} and reviewed by {reviewer} in the Multi-AI Command Center "
-            f"(run {run.id}).",
+            code_jobs.no_skip_ci(
+                f"{title}\n\nWritten by {writer} and reviewed by {reviewer} in the Multi-AI Command Center "
+                f"(run {run.id})."
+            ),
         )
         state.update(branch=branch, head_sha=sha, ci_since=datetime.now(UTC).isoformat())
         state["touched"] = sorted(set(state.get("touched", [])) | set(applied.files))
@@ -328,27 +334,41 @@ class CodeSteps:
                 branch,
                 state["base"],
                 f"[{writer} + {reviewer}] {first_line}",
-                f"**Goal:** {run.goal}\n\nWritten by {writer}, reviewed by {reviewer}, in the Multi-AI "
-                f"Command Center (run `{run.id}`). Only the owner merges this, from the dashboard or here.",
+                f"**Goal:** {code_jobs.no_skip_ci(run.goal)}\n\nWritten by {writer}, reviewed by {reviewer}, "
+                f"in the Multi-AI Command Center (run `{run.id}`). Only the owner merges this, from the "
+                "dashboard or here.",
             )
             state["pr"] = {"number": number, "url": url, "title": f"[{writer} + {reviewer}] {first_line}"}
-        await self._save(run, state)
+        state.pop("last_answer", None)
+        step_key = run.step
+        await self._save(run, state, step="ci")  # one write: commit, pull request and next step
         changed = ", ".join(f"`{p}`" for p in sorted(applied.files))
         pr = state["pr"]
         await self._say(
             run,
             f"Pushed {len(applied.files)} file(s) to pull request [#{pr['number']}]({pr['url']}): {changed}. "
             "Waiting for the automatic tests.",
-            f"{run.step}{rnd}:pushed",
+            f"{step_key}{rnd}:pushed",
         )
-        await self._save(run, state, step="ci")
         return True
+
+    async def _stop(self, run: models.Run, state: dict[str, Any], reason: str) -> bool:
+        """End the job. With a pull request open, the owner still gets the card (merge, send
+        back or close it), so nothing is left open without a decision."""
+        if state.get("pr"):
+            await self._say(run, reason, f"stop{state.get('round', 0)}", kind="error")
+            state["stopped"] = reason
+            await self._save(run, state, step="final")
+            return True
+        await self.e._fail(run, "failed", reason)
+        return False
 
     # ------------------------------------------------------------ CI
 
     async def _ci(self, run: models.Run, state: dict[str, Any]) -> bool:
         since = datetime.fromisoformat(state.get("ci_since") or datetime.now(UTC).isoformat())
         slice_end = time.monotonic() + STEP_POLL_SLICE_SECONDS
+        poll = min(self.ci_poll_seconds, STEP_POLL_SLICE_SECONDS / 2)
         while True:
             result = await self.gh.ci(state["head_sha"])
             waited = (datetime.now(UTC) - since).total_seconds()
@@ -361,11 +381,11 @@ class CodeSteps:
                     "timeout", f"The automatic tests did not finish within {waited / 60:.0f} minutes."
                 )
                 break
-            if time.monotonic() + self.ci_poll_seconds > slice_end:
+            if time.monotonic() + poll > slice_end:
                 return True  # free the worker; the next slice continues waiting
-            await asyncio.sleep(self.ci_poll_seconds)
+            await asyncio.sleep(poll)
         if result.status == "none":
-            result.summary = "No automatic tests ran for this branch."
+            result.summary = "No automatic tests ran for this commit, so the change is not verified."
         state["ci"] = {"status": result.status, "summary": result.summary, "details": result.details}
         await self._save(run, state)
         await self._say(run, result.summary, f"ci{state.get('round', 0)}:result", kind="task.result")
@@ -411,8 +431,8 @@ class CodeSteps:
         text = await self._message_text(run, run.critic_id, f"review{rnd}")
         verdict = parse_review(text)
         state.update(review=verdict, review_text=text[-12_000:])
-        ci_ok = ci.get("status") in ("success", "none")
-        if verdict == "approve" and ci_ok:
+        # No CI run, or a timeout, is not a failure the writer can fix: conclude, unverified.
+        if verdict == "approve" and ci.get("status") in ("success", "none", "timeout"):
             await self._save(run, state, step="final")
         elif rnd < code_jobs.MAX_FIX_ROUNDS:
             state["round"] = rnd + 1
@@ -427,14 +447,17 @@ class CodeSteps:
         writer, reviewer = await self._names(run)
         pr = state.get("pr") or {}
         ci = state.get("ci") or {}
-        agreed = state.get("review") == "approve" and ci.get("status") in ("success", "none")
+        agreed = (
+            state.get("review") == "approve" and ci.get("status") == "success" and not state.get("stopped")
+        )
         tests = ci.get("summary") or "The automatic tests did not run."
         if agreed:
             verdict_line = f"**Verdict:** Needs you. {writer} and {reviewer} agree the change is ready."
             recommended, rec = "approve", "Approve: both agents agree and the automatic tests passed."
         else:
             verdict_line = (
-                f"**Verdict:** Needs you. {writer} and {reviewer} did not fully agree, or tests failed."
+                f"**Verdict:** Needs you. {writer} and {reviewer} did not fully agree, or the tests did not "
+                "pass."
             )
             recommended, rec = (
                 "more_info",
@@ -478,6 +501,7 @@ class CodeSteps:
                                 **pr,
                                 "branch": state.get("branch"),
                                 "head_sha": state.get("head_sha"),
+                                "base": state.get("base", "main"),
                             },
                             "on_approve": {"workflow": "none"},
                             "on_more_info": {"workflow": "code", "goal": run.goal},

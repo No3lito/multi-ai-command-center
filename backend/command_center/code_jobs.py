@@ -54,10 +54,22 @@ class GitHubError(Exception):
 def blocked_reason(path: str) -> str | None:
     """Why agents may not change this path, or None. Secrets, CI settings and anything
     outside the repository are off limits."""
-    if not path or path.startswith(("/", "~")) or "\\" in path or ".." in path.split("/"):
+    if (
+        not path
+        or path.startswith(("/", "~"))
+        or "\\" in path
+        or not path.isascii()
+        or any(ord(c) < 32 or ord(c) == 127 for c in path)
+    ):
         return "not a plain path inside the repository"
-    name = path.rsplit("/", 1)[-1].lower()
-    if path.startswith(".github/"):
+    parts = path.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        return "not a plain path inside the repository"
+    lower = [p.lower() for p in parts]
+    name = lower[-1]
+    if ".git" in lower:
+        return "git internals are never changed"
+    if lower[0] == ".github" or name == "codeowners":
         return "CI and repository settings are changed by the owner only"
     if name.startswith(".env") and name != ".env.example":
         return "environment files can hold secrets"
@@ -182,6 +194,8 @@ def apply_edits(current: dict[str, str], existing: set[str], edits: list[Edit]) 
         if e.search is None:
             if e.path not in existing:
                 out.errors.append(f"{e.path}: cannot delete a file that does not exist.")
+            elif e.path not in current:
+                out.errors.append(f"{e.path}: you were not shown this file, so you cannot delete it.")
             else:
                 work[e.path] = None
             continue
@@ -226,6 +240,32 @@ def diff_text(before: dict[str, str], after: dict[str, str | None]) -> str:
             )
         )
     return "".join(parts)
+
+
+_SKIP_CI = re.compile(
+    r"\[\s*(skip|no)[ _-]?(ci|actions)\s*\]|\[\s*(ci|actions)[ _-]?skip\s*\]|\*\*\*NO_CI\*\*\*", re.I
+)
+
+
+def no_skip_ci(text: str) -> str:
+    """Commit messages and titles must never switch the automatic tests off."""
+    return _SKIP_CI.sub("", text)
+
+
+def check_pr_for_merge(pr: dict[str, Any], head_sha: str, base: str) -> str | None:
+    """Why this pull request must not be merged by the card, or None."""
+    if pr.get("merged"):
+        return None
+    if pr.get("state") != "open":
+        return "it is no longer open"
+    head = pr.get("head") or {}
+    if not str(head.get("ref") or "").startswith(BRANCH_PREFIX):
+        return "it is not a code job branch"
+    if str((pr.get("base") or {}).get("ref") or "") != base:
+        return f"it does not target {base}"
+    if head_sha and str(head.get("sha") or "") != head_sha:
+        return "its branch changed after the review; send it back to review the new commits"
+    return None
 
 
 def branch_name(goal: str, run_id: str) -> str:
@@ -412,9 +452,12 @@ class GitHub:
         lines = [re.sub(r"^\S+Z ", "", ln) for ln in resp.text.splitlines()]
         return "\n".join(lines)[-chars:]
 
-    async def merge(self, number: int, title: str) -> str:
+    async def merge(self, number: int, title: str, head_sha: str) -> str:
+        """Squash-merge, only if the pull request still points at the commit that was reviewed."""
         data = await self._req(
-            "PUT", self._r(f"/pulls/{number}/merge"), json={"merge_method": "squash", "commit_title": title}
+            "PUT",
+            self._r(f"/pulls/{number}/merge"),
+            json={"merge_method": "squash", "commit_title": title, "sha": head_sha},
         )
         return str(data.get("sha") or "")
 

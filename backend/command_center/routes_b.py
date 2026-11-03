@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from command_center import decisions as decisions_mod
 from command_center import files, project_files
-from command_center.code_jobs import GitHubError, github_from, writer_and_reviewer
+from command_center.code_jobs import GitHubError, check_pr_for_merge, github_from
 from command_center.config import Settings
 from command_center.db import models
 from command_center.db.session import Database
@@ -444,14 +444,15 @@ def register(
                 )
         planner_id, critic_id = body.planner_id, body.critic_id
         if code:
-            # Writer and reviewer take turns from one job to the next.
-            a, b = (
-                await session.get(models.Principal, planner_id),
-                await session.get(models.Principal, critic_id),
-            )
-            assert a is not None and b is not None
-            writer, reviewer = await writer_and_reviewer(session, a, b)
-            planner_id, critic_id = writer.id, reviewer.id
+            # The coding team is this room's Claude and GPT agents; they take turns writing.
+            pair = await decisions_mod.code_pair(session, room_id, settings)
+            if pair is None or {pair[0].id, pair[1].id} != {planner_id, critic_id}:
+                raise api_error(
+                    422,
+                    "validation_error",
+                    "A code job needs this room's Claude and GPT agents, both able to run.",
+                )
+            planner_id, critic_id = pair[0].id, pair[1].id
         run_id = new_id("run")
         run = models.Run(
             id=run_id,
@@ -897,7 +898,8 @@ def register(
     async def answer_code_pr(decision: models.Decision, answer: str) -> str | None:
         """A finished code job's card: approve merges the pull request, decline closes it.
         A failed merge raises, so the card stays open and nothing is recorded."""
-        pr = _code_pr((decision.follow_up or {}).get("code_pr"))
+        raw = (decision.follow_up or {}).get("code_pr") or {}
+        pr = _code_pr(raw)
         if pr is None or answer not in ("approve", "decline"):
             return None
         gh = github_from(settings)
@@ -908,9 +910,21 @@ def register(
                 )
             return f"Pull request #{pr.number} was not closed on GitHub (no token is set)."
         try:
+            live = await gh.pr_state(pr.number)
             if answer == "approve":
-                await gh.merge(pr.number, pr.title or f"Pull request #{pr.number}")
+                if live.get("merged"):
+                    return f"Pull request #{pr.number} was already merged on GitHub."
+                why = check_pr_for_merge(live, str(raw.get("head_sha") or ""), str(raw.get("base") or "main"))
+                if why or not raw.get("head_sha"):
+                    raise api_error(
+                        409,
+                        "merge_refused",
+                        f"Not merged: pull request #{pr.number} {why or 'has no reviewed commit on record'}.",
+                    )
+                await gh.merge(pr.number, pr.title or f"Pull request #{pr.number}", str(raw["head_sha"]))
                 return f"Merged pull request #{pr.number} on GitHub. Rebuild the Command Center to use it."
+            if live.get("state") != "open":
+                return f"Pull request #{pr.number} was already closed on GitHub."
             await gh.close(pr.number)
             return f"Closed pull request #{pr.number} on GitHub."
         except GitHubError as exc:

@@ -131,10 +131,20 @@ def make_app(repo: FakeRepo) -> Starlette:
             {"encoding": "base64", "content": base64.b64encode(files[path].encode()).decode()}
         )
 
+    def view(pr: dict[str, Any]) -> dict[str, Any]:
+        """GitHub's shape: head and base are objects; head.sha is the branch's current commit."""
+        return {
+            **pr,
+            "head": {"ref": pr["head"], "sha": repo.branches.get(pr["head"])},
+            "base": {"ref": pr["base"]},
+        }
+
     async def pulls(request: Request) -> Response:
         if request.method == "GET":
             head = request.query_params.get("head", "").split(":", 1)[-1]
-            return JSONResponse([p for p in repo.prs.values() if p["head"] == head and p["state"] == "open"])
+            return JSONResponse(
+                [view(p) for p in repo.prs.values() if p["head"] == head and p["state"] == "open"]
+            )
         body = await request.json()
         if any(p["head"] == body["head"] and p["state"] == "open" for p in repo.prs.values()):
             return JSONResponse(
@@ -151,7 +161,7 @@ def make_app(repo: FakeRepo) -> Starlette:
             "state": "open",
             "merged": False,
         }
-        return JSONResponse(repo.prs[number], status_code=201)
+        return JSONResponse(view(repo.prs[number]), status_code=201)
 
     async def pull(request: Request) -> Response:
         pr = repo.prs.get(int(request.path_params["n"]))
@@ -159,16 +169,19 @@ def make_app(repo: FakeRepo) -> Starlette:
             return JSONResponse({"message": "Not Found"}, status_code=404)
         if request.method == "PATCH":
             pr.update(await request.json())
-        return JSONResponse(pr)
+        return JSONResponse(view(pr))
 
     async def merge(request: Request) -> Response:
         pr = repo.prs[int(request.path_params["n"])]
         if pr["state"] != "open":
             return JSONResponse({"message": "Pull Request is not mergeable"}, status_code=405)
         head = repo.branches[pr["head"]]
-        sha = repo._commit(
-            repo.commits[head]["files"], [repo.branches["main"]], (await request.json())["commit_title"]
-        )
+        body = await request.json()
+        if body.get("sha") and body["sha"] != head:
+            return JSONResponse(
+                {"message": "Head branch was modified. Review and try the merge again."}, status_code=409
+            )
+        sha = repo._commit(repo.commits[head]["files"], [repo.branches["main"]], body["commit_title"])
         repo.branches["main"] = sha
         pr.update(state="closed", merged=True)
         return JSONResponse({"sha": sha, "merged": True})
