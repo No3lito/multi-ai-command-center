@@ -238,14 +238,18 @@ class CodeSteps:
         if fixing:
             if state.get("owner_note"):
                 notes.append(
-                    "The owner sent it back with this note (every sentence is a requirement): "
+                    "The owner sent it back with this note. Every sentence is a requirement, and it "
+                    "overrides the original goal and background where they differ: "
                     f"{state['owner_note']}"
                 )
             if state.get("review_text"):
                 notes.append(f"{reviewer}'s review:\n{state['review_text'][-8000:]}")
             ci = state.get("ci") or {}
             if ci.get("status") == "failure":
-                notes.append(f"The automatic tests failed. {ci.get('summary', '')}\n{ci.get('details', '')}")
+                notes.append(
+                    f"The automatic tests failed. {ci.get('summary', '')} Fix the KEY ERRORS below first; "
+                    f"other log lines are usually noise.\n{ci.get('details', '')}"
+                )
             if state.get("apply_errors"):
                 notes.append(
                     "Your previous edits could not be applied:\n- " + "\n- ".join(state["apply_errors"])
@@ -425,7 +429,7 @@ class CodeSteps:
             run,
             run.critic_id,
             f"Review {writer}'s code change for this goal: {run.goal}\n\n{RULES}\n\n{_context(state)}"
-            "Automatic tests: "
+            f"{_owner_note(state)}Automatic tests: "
             f"{ci.get('summary', 'unknown')}\n\nCheck that it meets the goal, is correct, is tested, is "
             "safe (no secrets, no health data, nothing outside the goal) and fits the code around it. "
             "Do not ask for changes that are only taste. If changes are needed, list each one as a "
@@ -539,6 +543,18 @@ class CodeSteps:
             pending_decisions=[question] if pr else [],
         )
         return False
+
+
+def _owner_note(state: dict[str, Any]) -> str:
+    """When the owner sent the job back, his note sets the scope of this round for both agents."""
+    note = state.get("owner_note")
+    if not note:
+        return ""
+    return (
+        "The owner sent this pull request back with this note. It sets the scope of this round and "
+        f"overrides the original goal and background where they differ:\n{note}\nJudge the change "
+        "against the note: do not ask for work the note leaves for later jobs.\n\n"
+    )
 
 
 def _context(state: dict[str, Any]) -> str:

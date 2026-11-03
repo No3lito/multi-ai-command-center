@@ -212,7 +212,8 @@ def make_app(repo: FakeRepo) -> Starlette:
 
     async def logs(request: Request) -> Response:
         return PlainTextResponse(
-            "2026-11-03T10:00:00.0000000Z FAILED tests/test_calc.py::test_add - assert -1 == 3"
+            '2026-11-03T10:00:00.0000000Z postgres: FATAL:  database "cc" does not exist\n'
+            "2026-11-03T10:00:01.0000000Z FAILED tests/test_calc.py::test_add - assert -1 == 3\n"
         )
 
     async def comment(request: Request) -> Response:

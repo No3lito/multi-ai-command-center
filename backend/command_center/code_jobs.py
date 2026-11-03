@@ -51,6 +51,28 @@ class GitHubError(Exception):
 # ---------------------------------------------------------------- path rules
 
 
+_ERROR_LINE = re.compile(
+    r"(^|\s)(Error:|AssertionError|Expected:|Received:|FAILED |\u2718|\u00d7|error TS\d+|Traceback|E\s{2,}\S|"
+    r"\d+ failed|SyntaxError|TypeError|ModuleNotFoundError)"
+)
+_NOISE = re.compile(r"(##\[|database \"\S+\" does not exist|^\s*at\s)", re.IGNORECASE)
+
+
+def key_errors(log: str, limit: int = 40) -> str:
+    """The lines of a CI log that say what failed (with a line of context each), so the writer
+    fixes the real failure instead of chasing noise such as service-container warnings."""
+    lines = log.splitlines()
+    keep: list[int] = []
+    for i, line in enumerate(lines):
+        if _ERROR_LINE.search(line) and not _NOISE.search(line):
+            keep.extend(j for j in (i - 1, i, i + 1) if 0 <= j < len(lines))
+    out: list[str] = []
+    for i in dict.fromkeys(keep):
+        if not _NOISE.search(lines[i]):
+            out.append(lines[i].rstrip())
+    return "\n".join(out[:limit])
+
+
 def blocked_reason(path: str) -> str | None:
     """Why agents may not change this path, or None. Secrets, CI settings and anything
     outside the repository are off limits."""
@@ -426,23 +448,34 @@ class GitHub:
         if not failed:
             return CiResult("success", "Automatic tests passed.")
         names: list[str] = []
-        details: list[str] = []
+        errors: list[str] = []
+        tails: list[str] = []
         for r in failed[:3]:
             jobs = await self._req("GET", self._r(f"/actions/runs/{r['id']}/jobs"), params={"per_page": 50})
             for job in jobs.get("jobs") or []:
                 if job.get("conclusion") in ("success", "skipped", "neutral"):
                     continue
                 steps = [s["name"] for s in job.get("steps") or [] if s.get("conclusion") == "failure"]
-                names.append(job["name"] + (f" ({', '.join(steps)})" if steps else ""))
-                details.append(f"Job {job['name']} failed at: {', '.join(steps) or 'unknown step'}")
-                tail = await self._log_tail(int(job["id"]))
-                if tail:
-                    details.append(tail)
+                label = job["name"] + (f" ({', '.join(steps)})" if steps else "")
+                if label in names:
+                    continue  # the same job ran for the push and for the pull request
+                names.append(label)
+                log = await self._log(int(job["id"]))
+                found = key_errors(log)
+                if found:
+                    errors.append(f"Job {job['name']}:\n{found}")
+                tails.append(f"End of the {job['name']} log:\n{log[-3000:]}")
         summary = "Automatic tests failed: " + ("; ".join(names) or "see GitHub") + "."
-        return CiResult("failure", summary, "\n".join(details)[-12_000:])
+        if errors:
+            first = next((ln for ln in errors[0].splitlines()[1:] if ln.strip()), "")
+            summary += f" First error: {first.strip()[:200]}"
+        details = (
+            "KEY ERRORS (fix these):\n" + "\n\n".join(errors) + "\n\n" if errors else ""
+        ) + "\n\n".join(tails)
+        return CiResult("failure", summary, details[:14_000])
 
-    async def _log_tail(self, job_id: int, chars: int = 4_000) -> str:
-        """The end of a failed job's log (best effort; the log host is a redirect)."""
+    async def _log(self, job_id: int) -> str:
+        """A failed job's log without timestamps (best effort; the log host is a redirect)."""
         try:
             resp = await self._client.get(self._r(f"/actions/jobs/{job_id}/logs"), follow_redirects=True)
         except httpx.HTTPError:
@@ -450,7 +483,7 @@ class GitHub:
         if resp.status_code != 200:
             return ""
         lines = [re.sub(r"^\S+Z ", "", ln) for ln in resp.text.splitlines()]
-        return "\n".join(lines)[-chars:]
+        return "\n".join(lines)[-200_000:]
 
     async def merge(self, number: int, title: str, head_sha: str) -> str:
         """Squash-merge, only if the pull request still points at the commit that was reviewed."""
