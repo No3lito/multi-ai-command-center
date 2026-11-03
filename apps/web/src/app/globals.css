@@ -1,50 +1,12 @@
 @import "tailwindcss";
 
-/* Theme tokens. Light by default, dark via prefers-color-scheme. */
-:root {
-  --bg: #f6f7f9;
-  --panel: #ffffff;
-  --panel-2: #f0f2f5;
-  --border: #dde1e7;
-  --text: #15181d;
-  --muted: #5d6673;
-  --accent: #2557d6;
-  --accent-fg: #ffffff;
-  --accent-soft: #e5ecfc;
-  --ok: #18794e;
-  --ok-soft: #e3f4ea;
-  --warn: #9a5b00;
-  --warn-soft: #fdf1dc;
-  --danger: #c4302b;
-  --danger-soft: #fce7e6;
-  --focus: #2557d6;
-  color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e1013;
-    --panel: #15181d;
-    --panel-2: #1c2027;
-    --border: #2a2f38;
-    --text: #e6e9ee;
-    --muted: #949cab;
-    --accent: #6d95ff;
-    --accent-fg: #0b0d10;
-    --accent-soft: #1c2a4a;
-    --ok: #4cc38a;
-    --ok-soft: #12291e;
-    --warn: #f0b04a;
-    --warn-soft: #2e2311;
-    --danger: #ff6b63;
-    --danger-soft: #341716;
-    --focus: #8aaaff;
-    color-scheme: dark;
-  }
-}
+/* All tokens live in tokens.css. */
+@import "./tokens.css";
 
 @theme inline {
   --color-bg: var(--bg);
+  --color-sidebar: var(--sidebar);
+  --color-accent-ink: var(--accent-ink);
   --color-panel: var(--panel);
   --color-panel-2: var(--panel-2);
   --color-line: var(--border);
@@ -59,8 +21,8 @@
   --color-warn-soft: var(--warn-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: var(--font-sans-stack);
+  --font-mono: var(--font-mono-stack);
 }
 
 html,
@@ -72,20 +34,20 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: var(--text-body);
+  line-height: var(--lh-body);
   -webkit-font-smoothing: antialiased;
 }
 
-/* Phones: larger body text for reading chat and cards (iOS also stops zooming into inputs at 16px). */
-@media (max-width: 640px) {
+/* Phones: body text is 16px; this also stops iOS zooming into inputs. */
+@media (max-width: 767px) {
   body {
-    font-size: 16px;
+    font-size: var(--text-body-phone);
   }
   input,
   textarea,
   select {
-    font-size: 16px;
+    font-size: var(--text-body-phone);
   }
 }
 

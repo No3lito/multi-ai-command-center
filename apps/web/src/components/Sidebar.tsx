@@ -26,8 +26,8 @@ export function Sidebar({ open, principal, rooms, selectedId, onSelect, onCreate
       <aside
         id="left-sidebar"
         aria-label="Rooms"
-        className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-line bg-panel transition-transform lg:static lg:translate-x-0 ${
-          open ? "translate-x-0" : "-translate-x-full invisible lg:visible"
+        className={`fixed inset-y-0 left-0 z-40 flex w-[min(var(--drawer-w),100vw)] shrink-0 flex-col border-r border-line bg-sidebar transition-transform md:w-[var(--sidebar-w)] md:static md:translate-x-0 ${
+          open ? "translate-x-0" : "-translate-x-full invisible md:visible"
         }`}
       >
         <div className="flex h-12 items-center gap-2 border-b border-line px-3">
@@ -40,7 +40,7 @@ export function Sidebar({ open, principal, rooms, selectedId, onSelect, onCreate
             type="button"
             data-testid="new-project-open"
             onClick={() => setCreating(true)}
-            className="mb-3 flex w-full items-center justify-center gap-1.5 rounded-md bg-accent px-2 py-2 text-sm font-semibold text-white hover:opacity-90"
+            className="mb-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent px-2 py-2 text-sm font-semibold text-accent-fg hover:opacity-90"
           >
             <span aria-hidden="true" className="text-base leading-none">
               +
@@ -76,11 +76,13 @@ export function Sidebar({ open, principal, rooms, selectedId, onSelect, onCreate
                       data-room-id={room.id}
                       aria-current={active ? "page" : undefined}
                       onClick={() => onSelect(room.id)}
-                      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left ${
-                        active ? "bg-accent-soft font-medium text-fg" : "text-muted hover:bg-panel-2 hover:text-fg"
+                      className={`flex min-h-10 w-full items-center gap-2 rounded-lg border-l-2 px-2 text-left active:bg-line disabled:text-[var(--disabled)] ${
+                        active
+                          ? "border-accent bg-accent-soft font-semibold text-fg"
+                          : "border-transparent text-muted hover:bg-panel-2 hover:text-fg"
                       }`}
                     >
-                      <span aria-hidden="true" className="font-mono text-muted">
+                      <span aria-hidden="true" className="text-muted">
                         #
                       </span>
                       <span className="min-w-0 flex-1 truncate">{room.name}</span>
@@ -95,7 +97,7 @@ export function Sidebar({ open, principal, rooms, selectedId, onSelect, onCreate
         <div className="flex items-center gap-2 border-t border-line px-3 py-2">
           <span
             aria-hidden="true"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent-ink"
           >
             {principal.display_name.slice(0, 1).toUpperCase()}
           </span>
