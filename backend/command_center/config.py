@@ -83,6 +83,17 @@ class Settings(BaseSettings):
     # Grok is the builder: xAI's coding model by default (cheapest Grok text model, $1/$2 per
     # 1M). Switch the agent to grok-4.7 at will (a reasoning model, so less predictable cost).
     default_grok_model: str = "grok-build-0.1"
+    # ---- Code jobs (Claude and GPT change the Command Center's code via pull requests) ----
+    # A GitHub token limited to CODE_REPO (contents, pull requests: read and write; actions:
+    # read). Unset: code jobs are off and nobody is offered as able to change code.
+    github_token: SecretStr | None = None
+    code_repo: str = Field(default="No3lito/multi-ai-command-center", pattern=r"^[\w.-]+/[\w.-]+$")
+    github_api_url: str = "https://api.github.com"
+    # Spending limit for one code job (writing, reviewing and up to two fixes).
+    code_job_budget_usd: float = Field(default=3.0, gt=0, le=10)
+    # How long a job waits for the repository's automatic tests (CI) after each push.
+    code_ci_wait_minutes: float = Field(default=25.0, gt=0, le=120)
+    code_ci_poll_seconds: float = Field(default=20.0, gt=0, le=300)
     log_level: str = "INFO"
 
     @field_validator("owner_password")
@@ -121,6 +132,10 @@ class Settings(BaseSettings):
         }.get(provider)
         value = secret.get_secret_value().strip() if secret is not None else ""
         return value or None
+
+    @property
+    def code_jobs_enabled(self) -> bool:
+        return bool(self.github_token and self.github_token.get_secret_value().strip())
 
     @property
     def asyncpg_dsn(self) -> str:

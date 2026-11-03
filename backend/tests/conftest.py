@@ -65,6 +65,9 @@ def run_server(database_url: str, tmp_path: Path, **extra_env: str) -> Iterator[
     base = f"http://127.0.0.1:{port}"
     log_path = tmp_path / f"server-{port}.log"
     extra_env.setdefault("MCP_PORT", str(mcp_port))
+    # Never reach real GitHub from tests, even if the machine has a GITHUB_TOKEN set.
+    extra_env.setdefault("GITHUB_TOKEN", "")
+    extra_env.setdefault("GITHUB_API_URL", "http://127.0.0.1:9")
     env = dict(
         os.environ,
         DATABASE_URL=database_url,

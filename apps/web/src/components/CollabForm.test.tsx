@@ -298,3 +298,39 @@ it("tells the owner how to get suggestions in a room without a project", () => {
   render(<CollabForm roomId={ROOM_A} roomAgents={both} createRun={vi.fn()} onStarted={() => {}} noProjectHint />);
   expect(screen.getByTestId("collab-no-project")).toHaveTextContent("Link one under Setup");
 });
+
+describe("Code change workflow", () => {
+  const on = { enabled: true, repo: "No3lito/multi-ai-command-center", budget_usd: 3, reason: null };
+
+  it("explains the job and posts a code run without attachments or budget choices", async () => {
+    const user = userEvent.setup();
+    const createRun = vi.fn(async () => run());
+    render(<CollabForm roomId={ROOM_A} roomAgents={both} createRun={createRun} onStarted={() => {}} codeJobs={on} />);
+    await user.selectOptions(screen.getByTestId("collab-workflow"), "code");
+    expect(screen.getByTestId("collab-code-info")).toHaveTextContent("Budget: $3.00 per job");
+    expect(screen.getByTestId("collab-code-info")).toHaveTextContent("No3lito/multi-ai-command-center");
+    await user.type(screen.getByTestId("collab-goal"), "Add a dark mode toggle");
+    await user.click(screen.getByTestId("collab-start"));
+    await waitFor(() => expect(createRun).toHaveBeenCalled());
+    expect(createRun).toHaveBeenCalledWith(ROOM_A, {
+      goal: "Add a dark mode toggle",
+      workflow: "code",
+      planner_id: CLAUDE_ID,
+      critic_id: GPT_ID,
+      budget_usd: 0.5,
+      max_turns: 8,
+    });
+  });
+
+  it("shows the option as off, with the reason, when no GitHub token is set", () => {
+    const off = { ...on, enabled: false, reason: "Add a GitHub token (GITHUB_TOKEN in .env) and restart." };
+    render(<CollabForm roomId={ROOM_A} roomAgents={both} createRun={vi.fn()} onStarted={() => {}} codeJobs={off} />);
+    expect(screen.getByRole("option", { name: /Code change.*needs a GitHub token/ })).toBeDisabled();
+    expect(screen.getByTestId("collab-code-off")).toHaveTextContent("GITHUB_TOKEN");
+  });
+
+  it("hides the option when the server does not report code jobs", () => {
+    render(<CollabForm roomId={ROOM_A} roomAgents={both} createRun={vi.fn()} onStarted={() => {}} />);
+    expect(screen.queryByRole("option", { name: /Code change/ })).toBeNull();
+  });
+});

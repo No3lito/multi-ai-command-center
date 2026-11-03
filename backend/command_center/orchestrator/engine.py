@@ -20,6 +20,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from command_center import decisions, project_files
+from command_center.code_jobs import GitHub
 from command_center.db import models
 from command_center.files import FileAccessError
 from command_center.ids import new_id
@@ -308,7 +309,14 @@ class BuiltinEngine:
         workspace: Callable[[], Workspace | None] | None = None,
         attachment_max_files: int = 10,
         attachment_max_chars: int = 300_000,
+        github: Callable[[], GitHub | None] | None = None,
+        code_ci_wait_seconds: float = 25 * 60,
+        code_ci_poll_seconds: float = 20.0,
     ) -> None:
+        # Code jobs: a GitHub client limited to the Command Center's repository (None: off).
+        self.github = github or (lambda: None)
+        self.code_ci_wait_seconds = code_ci_wait_seconds
+        self.code_ci_poll_seconds = code_ci_poll_seconds
         self.max_runs_per_tree = max_runs_per_tree
         # The owner's project workspace (None when no folder is configured).
         self.workspace = workspace or (lambda: None)
@@ -586,6 +594,8 @@ class BuiltinEngine:
             return False
         if run.kind == "reply":
             return await self._reply_step(run)
+        if run.kind == "code":
+            return await self._code_step(run)
         if run.wrap_up and run.step not in ("brief", "summary", "done"):
             # The owner asked to conclude now: skip the remaining steps and write the brief.
             await self._update(
@@ -607,6 +617,25 @@ class BuiltinEngine:
         if run.kind == "review":
             return await self._review_step(run)
         return await self._collab_step(run)
+
+    async def _code_step(self, run: models.Run) -> bool:
+        from command_center.orchestrator.code_steps import CodeSteps
+
+        gh = self.github()
+        if gh is None:
+            await self._fail(
+                run,
+                "failed",
+                "Code jobs are off: no GitHub token is set. Add GITHUB_TOKEN (limited to the Command "
+                "Center repository) to .env and restart.",
+            )
+            return False
+        try:
+            return await CodeSteps(
+                self, gh, ci_wait_seconds=self.code_ci_wait_seconds, ci_poll_seconds=self.code_ci_poll_seconds
+            ).step(run)
+        finally:
+            await gh.aclose()
 
     async def _reply_step(self, run: models.Run) -> bool:
         assert run.agent_id is not None
@@ -1127,7 +1156,11 @@ class BuiltinEngine:
                 )
                 roster.append((a.display_name, prof.provider if prof is not None else "model", usable))
             externals = [e.display_name for e in await room_externals(s, run.room_id) if e.status == "active"]
-            executors = decisions.describe_executors(roster, externals)
+            executors = decisions.describe_executors(
+                roster,
+                externals,
+                code_repo=self.models.settings.code_repo if self.github() is not None else None,
+            )
             attached = list(
                 (
                     await s.scalars(

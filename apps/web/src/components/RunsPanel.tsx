@@ -109,7 +109,9 @@ function RunItem({
             ]
               .filter(Boolean)
               .join(" and ")}`
-          : agentName(run.agent_id);
+          : run.kind === "code"
+            ? `${agentName(run.planner_id) ?? "writer"} writes, ${agentName(run.critic_id) ?? "reviewer"} reviews`
+            : agentName(run.agent_id);
   const waitingFor = run.status === "waiting" ? (agentName(run.waiting_for ?? null) ?? "an external agent") : null;
 
   async function wrapUp() {
@@ -186,6 +188,17 @@ function RunItem({
         {run.goal || <span className="text-muted">(no goal)</span>}
       </p>
       {who && <p className="truncate text-[10px] text-muted">{who}</p>}
+      {run.code_pr && (
+        <a
+          href={run.code_pr.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="run-pr-link"
+          className="text-[11px] font-medium text-accent underline"
+        >
+          Pull request #{run.code_pr.number}
+        </a>
+      )}
       <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 font-mono text-[10px] text-muted">
         <dt>step</dt>
         <dd data-testid="run-step" className="text-fg">

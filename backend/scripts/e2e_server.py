@@ -56,6 +56,10 @@ def main() -> None:
             WS_HEARTBEAT_SECONDS="2",
             # Browser tests never spend money: agents use labeled simulated stand-ins.
             PROVIDER_MODE=os.environ.get("E2E_PROVIDER_MODE", "simulated"),
+            # Code jobs show as on, but point at an address nothing listens on: browser tests
+            # never reach GitHub, even if this machine has a real GITHUB_TOKEN.
+            GITHUB_TOKEN="e2e-fake-token",  # noqa: S106  (fake; the API address below is unused)
+            GITHUB_API_URL="http://127.0.0.1:9",
         )
         subprocess.run(
             [sys.executable, "-m", "command_center.cli", "migrate"], cwd=BACKEND, env=env, check=True

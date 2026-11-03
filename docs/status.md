@@ -1,6 +1,24 @@
 # Project status
 
-Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
+Updated Nov 3, 2026. This file is the single place to see what works, what was tested, and what is blocked.
+
+## Code jobs (in review, branch `agent/claude/code-jobs`, stacked on PR #12)
+
+Claude and GPT change the Command Center's code together; Noel decides with one click. Contract: [`docs/api/code-jobs.md`](api/code-jobs.md).
+
+- **Team, not one agent:** one writes, the other reviews, and they swap roles every job. The writer picks the files, writes edit blocks, and the edits are committed to an `agent/command-center/...` branch with a pull request. The repository's automatic tests run, the reviewer checks the diff and the results, and the writer fixes at most twice.
+- **One card at the end:** approve merges the pull request on GitHub, decline closes it, and "Send it back" starts another job on the same pull request with your note. The card links to the changes.
+- **Limits:** $3.00 per job (`CODE_JOB_BUDGET_USD`), enforced before every model call and counted in the $10 cap. Agents cannot change `.github/`, `.env` files, key files or anything outside the repository; an edit that cannot apply means nothing is committed.
+- **No git on the server:** everything goes through GitHub's REST API with a token limited to one repository. Without the token the option shows as off with the reason.
+- **Tests never reach GitHub:** test servers clear `GITHUB_TOKEN`, and the browser tests point code jobs at an unused local address.
+
+Evidence (FAKE ADAPTER and FAKE GITHUB; not yet run against real GitHub):
+
+- Backend: 173 passed, including the whole write, CI failure, review, fix, approve loop; blocked `.env` edits; the 2-round stop; a wrong token; and merge and close through the server.
+- Dashboard: 149 passed.
+- Playwright: 9 passed, including the Code change option and a plain failure when GitHub cannot be reached.
+
+Needs from the owner: a fine-grained GitHub token limited to this repository (see the contract), placed in `.env` only.
 
 ## Dashboard redesign (in review, branch `agent/claude/dashboard-redesign`, stacked on PR #11)
 

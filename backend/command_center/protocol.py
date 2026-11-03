@@ -258,6 +258,21 @@ class InboxFileIn(Strict):
     project_path: str = Field(min_length=1, max_length=300)
 
 
+class CodePrOut(Strict):
+    number: int
+    url: str
+    title: str = ""
+
+
+class CodeJobsOut(Strict):
+    """Whether Claude and GPT can change the Command Center's code (a GitHub token is set)."""
+
+    enabled: bool
+    repo: str
+    budget_usd: float
+    reason: str | None = None
+
+
 class FollowUpPlanOut(Strict):
     workflow: str
     worker: str | None = None
@@ -286,6 +301,8 @@ class DecisionOut(Strict):
     cannot_run_reason: str | None = None
     # The run that raised it was the last allowed round on this topic.
     final_round: bool = False
+    # A finished code job: approving merges this pull request, declining closes it.
+    code_pr: CodePrOut | None = None
 
 
 class DecisionAnswerIn(Strict):
@@ -331,7 +348,9 @@ class RunCreateIn(Strict):
     # build: planner and critic co-design, builder builds exactly what they specify.
     # review: builder (the worker, often an external agent) shares its work, planner and
     # critic review it and write a plan, the worker responds.
-    workflow: Literal["collab", "build", "review"] = "collab"
+    # code: planner and critic are the coding team; one writes, the other reviews (they take
+    # turns between jobs), through a pull request on the Command Center's repository.
+    workflow: Literal["collab", "build", "review", "code"] = "collab"
     planner_id: str = Field(pattern=PRINCIPAL_ID)
     critic_id: str = Field(pattern=PRINCIPAL_ID)
     builder_id: str | None = Field(default=None, pattern=PRINCIPAL_ID)
@@ -351,7 +370,7 @@ class RunCreateIn(Strict):
 class RunOut(Strict):
     id: str
     room_id: str
-    kind: Literal["collab", "reply", "build", "review"]
+    kind: Literal["collab", "reply", "build", "review", "code"]
     status: RunStatus
     goal: str
     step: str
@@ -372,6 +391,8 @@ class RunOut(Strict):
     chain_root_id: str | None = None
     chain_depth: int = 0
     wrap_up: bool = False
+    # Code jobs: the pull request, once opened.
+    code_pr: CodePrOut | None = None
     turn_count: int
     max_turns: int
     budget_usd: float
@@ -388,6 +409,8 @@ class DecisionAnswerOut(Strict):
     follow_up_run: RunOut | None
     # Approve or more info that started nothing, and why (also posted in the room).
     no_run_reason: str | None = None
+    # A code job's pull request: merged or closed on GitHub (also posted in the room).
+    code_result: str | None = None
 
 
 class HistoryOut(Strict):

@@ -1,6 +1,7 @@
 import type {
   Agent,
   AgentIn,
+  CodeJobs,
   CreateRunBody,
   Decision,
   DecisionAnswerBody,
@@ -192,6 +193,7 @@ export const api = {
 
   // Milestone B: agents
   listAgents: (signal?: AbortSignal) => request<Agent[]>("/api/agents", { signal }),
+  getCodeJobs: (signal?: AbortSignal) => request<CodeJobs>("/api/code-jobs", { signal }),
   createAgent: (agent: AgentIn) => request<Agent>("/api/agents", { method: "POST", body: agent }),
   updateAgent: (agentId: string, patch: Partial<AgentIn>) =>
     request<Agent>(`/api/agents/${enc(agentId)}`, {

@@ -6,7 +6,7 @@ Updated with every merged change. Read this before planning work on the Command 
 - **Claude and GPT** (model agents) read the conversation and attached files and write text: plans, reviews, specs, and code as text. **They cannot run code, open the repository, change files or merge anything.**
 - **Grok Bot** (connected over MCP) works with its own tools and files, reads the room's project folder, and saves to its `outputs/`. **It cannot change the Command Center's code.**
 - **Grok** (xAI model agent) is like Claude and GPT: text only. It has no API key on this install, so it is unavailable.
-- **Changing the Command Center's code** needs a coding agent with repository access, for example Claude Code or OpenAI Codex, working on a branch. Noel approves every merge. Never plan as if a builder in the room will apply code.
+- **Changing the Command Center's code:** when a GitHub token is set, Claude and GPT form a **coding team** (workflow `code`, see `docs/api/code-jobs.md`). One writes, the other reviews, CI runs, and Noel merges with one click on the card. Without a token, nobody in the room can change the code; never plan as if a builder will apply it.
 
 ## Code layout (verified)
 - Dashboard: `apps/web/src/components` (React components), `apps/web/src/lib` (API client, hooks, types). Next.js static export, served by the backend.
@@ -25,8 +25,9 @@ next 16.4.4 · react 19.3.1 · tailwindcss 4.3.3 · vitest 5.1.0 · @playwright/
   - They share a $2.00 budget per chain, and a dollar cap written in the owner's note is enforced.
   - They carry forward only the previous brief and its final message.
 - **Briefs** start with `**Verdict:** Done | Blocked | Needs you`.
+- **Code jobs** commit through GitHub's API to `agent/command-center/...` branches, never to `main`. They cannot change `.github/`, `.env` files or key files. Budget $3.00 per job by default; at most 2 fix rounds.
 
 ## Status
 - Merged to main: Milestone B, the Grok builder, the Grok Bot bridge, files and briefs, and decision cards (PR #8).
-- In review: PR #9 (self-serve dashboard), PR #10 (project workspace), PR #11 (conclude, don't loop) and the dashboard redesign.
+- In review: PR #9 (self-serve dashboard), PR #10 (project workspace), PR #11 (conclude, don't loop), PR #12 (dashboard redesign) and code jobs.
 - New rooms include every agent that can answer (Claude and GPT). The "collab" workflow is labeled **Collaborate** on the dashboard.

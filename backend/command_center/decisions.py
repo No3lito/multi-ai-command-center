@@ -22,6 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from command_center import files
+from command_center.code_jobs import EXECUTOR_LINE, writer_and_reviewer
 from command_center.config import Settings
 from command_center.db import models
 from command_center.ids import new_id
@@ -31,7 +32,7 @@ MAX_DECISIONS = 10
 DEFAULT_FOLLOW_UP_BUDGET = Decimal("0.50")
 _BLOCK = re.compile(r"```(?:decisions|json)?[ \t]*\n(\[[\s\S]*?\])\s*```", re.IGNORECASE)
 
-Workflow = Literal["review", "build", "collab", "none"]
+Workflow = Literal["review", "build", "collab", "code", "none"]
 
 
 class OnApprove(BaseModel):
@@ -108,7 +109,8 @@ def instruction_suffix(executors: list[str], attachments: list[str], *, final_ro
     who = "\n".join(f"- {e}" for e in executors) or "- none"
     final = (
         " THIS IS THE FINAL ROUND of this topic: every on_approve and on_more_info workflow must be "
-        '"none"; give the final recommendation in the brief instead of proposing more work.'
+        '"none" (or "code" when the approved work is a code change for the coding team); give the '
+        "final recommendation in the brief instead of proposing more discussion."
         if final_round
         else ""
     )
@@ -122,31 +124,39 @@ def instruction_suffix(executors: list[str], attachments: list[str], *, final_ro
         "the owner should attach if they follow the recommendation: conditions, caps and what must "
         'be checked first, written as an instruction to the agents), "cost" (what it would cost if '
         'known, else "unknown"), "on_approve" (what runs if the owner approves: {"workflow": '
-        '"review" | "build" | "collab" | "none", "worker": name or null, "goal": the full '
+        '"review" | "build" | "collab" | "code" | "none", "worker": name or null, "goal": the full '
         'goal for that run, "attachments": file paths}), and "on_more_info" (what runs to get '
         'the missing facts: {"workflow", "worker", "goal"}).\n'
         f"Who can actually do work in this room, and what each can and cannot do:\n{who}\n"
         'Only name a worker from that list, and only for work it can do. Use "collab" only when '
         "another discussion between the reviewers would produce something new (not another plan "
         "for the same work). If the work needs someone who is not on the list (for example "
-        'changing the Command Center\'s own code needs a coding agent), set workflow "none" and '
-        "say so plainly in the question. Files available to attach: "
+        "changing the Command Center's own code when no coding team is listed), set workflow "
+        '"none" and say so plainly in the question. Files available to attach: '
         f"{files_note}. Write goals that stand alone and include any limit the approval implies "
         "(for example a maximum spend). Never propose real trades, moving funds or changing live "
         "settings." + final
     )
 
 
-def describe_executors(agents: list[tuple[str, str, bool]], externals: list[str]) -> list[str]:
-    """agents: (name, provider, usable). External agents work with their own tools and files."""
+def describe_executors(
+    agents: list[tuple[str, str, bool]], externals: list[str], *, code_repo: str | None = None
+) -> list[str]:
+    """agents: (name, provider, usable). External agents work with their own tools and files.
+    code_repo: set when code jobs are on (a GitHub token is configured); the Claude and GPT
+    agents can then change the Command Center's code as a team, through pull requests."""
     lines = []
     for name, provider, usable in agents:
         if not usable:
             continue
         lines.append(
             f"{name} ({provider}): reads the conversation and attached files and writes answers, "
-            "designs, reviews and code as text. Cannot run code, open repositories or change files."
+            "designs, reviews and code as text. Cannot run code, open repositories or change files "
+            "on their own."
         )
+    team = [n for n, p, usable in agents if usable and p in ("anthropic", "openai", "simulated")]
+    if code_repo and len(team) >= 2:
+        lines.append(EXECUTOR_LINE.format(names=" and ".join(team[:2]), repo=code_repo))
     for name in externals:
         lines.append(
             f"{name} (connected agent): does tasks with its own tools, files and data, can read this "
@@ -235,7 +245,10 @@ async def chain_spent(session: AsyncSession, root_id: str) -> Decimal:
 
 
 async def plan_check(
-    session: AsyncSession, decision: models.Decision, answer: Literal["approve", "more_info"]
+    session: AsyncSession,
+    decision: models.Decision,
+    answer: Literal["approve", "more_info"],
+    settings: Settings | None = None,
 ) -> str | None:
     """Why the prepared follow-up cannot run, or None if it can. Used for cards and answers."""
     source = await session.get(models.Run, decision.run_id)
@@ -246,6 +259,14 @@ async def plan_check(
     )
     workflow = str(plan.get("workflow") or ("collab" if answer == "more_info" else "none"))
     if workflow == "none":
+        return None
+    if workflow == "code":
+        # Doing the work ends the discussion, so the round limit does not apply; the job has
+        # its own budget and the owner decides on the result.
+        if settings is not None and not settings.code_jobs_enabled:
+            return "Code jobs are off: no GitHub token is set (GITHUB_TOKEN in .env)."
+        if await code_pair(session, decision.room_id, settings) is None:
+            return "A code job needs two working agents (Claude and GPT) in this room."
         return None
     if (source.chain_depth or 0) >= MAX_ROUNDS:
         return (
@@ -284,9 +305,13 @@ async def start_follow_up(
     workflow = str(plan.get("workflow") or ("collab" if answer == "more_info" else "none"))
     if workflow == "none":
         return FollowUp(None)
-    blocked = await plan_check(session, decision, answer)
+    blocked = await plan_check(session, decision, answer, settings)
     if blocked:
         return FollowUp(None, blocked)
+    if workflow == "code":
+        return await _start_code_job(
+            session, settings, decision, source, plan, answer=answer, note=note, owner_id=owner_id
+        )
 
     root_id = source.chain_root_id or source.id
     depth = (source.chain_depth or 0) + 1
@@ -398,3 +423,103 @@ async def _previous_run_note(session: AsyncSession, source: models.Run) -> files
         chars=len(text),
         sha256=hashlib.sha256(raw).hexdigest(),
     )
+
+
+async def code_pair(
+    session: AsyncSession, room_id: str, settings: Settings | None
+) -> tuple[models.Principal, models.Principal] | None:
+    """The Claude and GPT agents of this room that can answer (writer and reviewer, in turn)."""
+    from command_center.providers.model_port import agent_status
+
+    rows = await session.scalars(
+        select(models.Principal)
+        .join(models.RoomMember, models.RoomMember.principal_id == models.Principal.id)
+        .where(
+            models.RoomMember.room_id == room_id,
+            models.Principal.kind == "agent",
+            models.Principal.status == "active",
+        )
+        .order_by(models.Principal.created_at)
+    )
+    by_provider: dict[str, models.Principal] = {}
+    for p in rows.all():
+        prof = await session.get(models.AgentProfile, p.id)
+        if prof is None:
+            continue
+        if settings is not None and agent_status(settings, prof) not in ("live", "simulated"):
+            continue
+        if prof.provider in ("anthropic", "openai"):
+            by_provider.setdefault(prof.provider, p)
+    if "anthropic" not in by_provider or "openai" not in by_provider:
+        return None
+    return await writer_and_reviewer(session, by_provider["anthropic"], by_provider["openai"])
+
+
+async def _start_code_job(
+    session: AsyncSession,
+    settings: Settings,
+    decision: models.Decision,
+    source: models.Run,
+    plan: dict[str, Any],
+    *,
+    answer: Literal["approve", "more_info"],
+    note: str | None,
+    owner_id: str,
+) -> FollowUp:
+    """Approve on a card that proposes a code change, or "send it back" on a finished pull
+    request: start a code job. A send-back continues the same branch and pull request, with
+    the same writer and reviewer, starting from the fix step."""
+    pr = decision.follow_up.get("code_pr")
+    budget = Decimal(str(settings.code_job_budget_usd))
+    cap = note_cap(note)
+    if cap is not None:
+        budget = min(budget, cap)
+    if budget < MIN_RUN_BUDGET:
+        return FollowUp(None, f"The note's limit is below the ${MIN_RUN_BUDGET:.2f} a code job needs.")
+    base_goal = str(plan.get("goal") or "").strip() or decision.question
+    goal = base_goal
+    if note and not pr:
+        goal += f"\nOwner's note (every sentence is a requirement): {note.strip()}"
+    state: dict[str, Any] | None = None
+    if pr and source.kind == "code" and source.code_state:
+        writer_id, reviewer_id = source.planner_id, source.critic_id
+        state = {
+            k: v
+            for k, v in source.code_state.items()
+            if k in ("base", "base_sha", "branch", "head_sha", "pr", "files", "touched")
+        }
+        state.update(
+            round=1, owner_note=(note or "Address the remaining review points and make the tests pass.")
+        )
+        step = "fix"
+    else:
+        pair = await code_pair(session, decision.room_id, settings)
+        if pair is None:
+            return FollowUp(None, "A code job needs two working agents (Claude and GPT) in this room.")
+        writer_id, reviewer_id = pair[0].id, pair[1].id
+        step = "scope"
+    run_id = new_id("run")
+    run = models.Run(
+        id=run_id,
+        root_run_id=run_id,
+        chain_root_id=source.chain_root_id or source.id,
+        chain_depth=(source.chain_depth or 0) + 1,
+        room_id=decision.room_id,
+        kind="code",
+        status="queued",
+        step=step,
+        goal=goal[:4000],
+        planner_id=writer_id,
+        critic_id=reviewer_id,
+        max_turns=8,
+        budget_usd=budget,
+        spent_usd=Decimal(0),
+        simulated=source.simulated,
+        write_brief=False,
+        agent_files=False,
+        code_state=state,
+        created_by=owner_id,
+    )
+    session.add(run)
+    await session.flush()
+    return FollowUp(run)

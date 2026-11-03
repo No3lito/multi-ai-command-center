@@ -41,6 +41,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       XAI_API_KEY: ${XAI_API_KEY:-}
       LIVE_BUDGET_USD: ${LIVE_BUDGET_USD:-10.00}
+      # Code jobs: Claude and GPT change this repository through pull requests; you merge.
+      # Off unless GITHUB_TOKEN is set (a fine-grained token limited to CODE_REPO).
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      CODE_REPO: ${CODE_REPO:-No3lito/multi-ai-command-center}
+      CODE_JOB_BUDGET_USD: ${CODE_JOB_BUDGET_USD:-3.00}
       # MCP gateway for external agents (Grok Bot). Listens inside the container; published
       # on this computer's loopback only. Expose it to the internet only through a tunnel
       # pointed at port 8001, never the dashboard on 8000.

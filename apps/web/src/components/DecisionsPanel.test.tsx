@@ -214,3 +214,34 @@ describe("confirm before answering", () => {
     expect(confirmLabel(decision(), "more_info", undefined)).toBe("Ask and start");
   });
 });
+
+describe("code job cards", () => {
+  const pr = decision({
+    question: "Merge pull request #7 into main?",
+    on_approve: { workflow: "none", worker: null, goal: "" },
+    on_more_info: { workflow: "code", worker: null, goal: "Fix add()" },
+    code_pr: { number: 7, url: "https://github.com/o/r/pull/7", title: "[Claude + GPT] Fix add()" },
+  });
+
+  it("says plainly that approve merges, decline closes and more info sends it back", () => {
+    expect(whatHappens(pr, "approve", undefined)).toMatch(/^Merges pull request #7 into main/);
+    expect(whatHappens(pr, "decline", undefined)).toMatch(/^Closes pull request #7/);
+    expect(whatHappens(pr, "more_info", undefined)).toMatch(/^Sends pull request #7 back/);
+    expect(confirmLabel(pr, "approve", undefined)).toBe("Merge #7");
+    expect(confirmLabel(pr, "decline", undefined)).toBe("Close #7");
+    expect(confirmLabel(pr, "more_info", undefined)).toBe("Send it back");
+  });
+
+  it("links to the pull request", () => {
+    render(<DecisionsPanel runs={[]} decisions={[pr]} onAnswer={vi.fn()} />);
+    const link = screen.getByTestId("decision-pr-link");
+    expect(link).toHaveAttribute("href", "https://github.com/o/r/pull/7");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("describes a proposed code change and its budget", () => {
+    const proposal = decision({ on_approve: { workflow: "code", worker: null, goal: "Add a dark mode toggle" } });
+    expect(describePlan(proposal.on_approve)).toMatch(/one of Claude and GPT writes the change/);
+    expect(whatHappens(proposal, "approve", undefined)).toMatch(/the code job limit/);
+  });
+});
