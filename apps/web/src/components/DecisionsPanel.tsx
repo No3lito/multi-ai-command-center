@@ -77,6 +77,19 @@ function DecisionCard({
   const [confirming, setConfirming] = useState<DecisionAnswer | null>(null);
   const sending = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  // Ready-made answers: pick one (the best is preselected) instead of writing a note.
+  const options = decision.options ?? [];
+  const [picked, setPicked] = useState(0);
+  const [custom, setCustom] = useState(options.length === 0);
+  const [pickedLabel, setPickedLabel] = useState<string | null>(null);
+  const choose = (i: number) => {
+    const o = options[i];
+    if (!o) return;
+    setNote(o.note);
+    setBudget("");
+    setPickedLabel(o.label);
+    setConfirming(o.answer);
+  };
 
   const budgetNum = budget.trim() ? Number(budget) : undefined;
   const budgetBad = budgetNum !== undefined && (!Number.isFinite(budgetNum) || budgetNum <= 0 || budgetNum > 5);
@@ -107,10 +120,10 @@ function DecisionCard({
     <li
       data-testid="decision-card"
       data-recommended={decision.recommended ?? undefined}
-      className="rounded-md border border-line bg-bg p-2 text-xs"
-      style={{ borderLeft: `4px solid ${EDGE[decision.recommended ?? "none"]}` }}
+      className="rounded-xl border border-line bg-panel-2 p-4 text-[13px]"
     >
-      <p className="font-medium text-fg">
+      <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-warn">Needs you</p>
+      <p className="text-[15px] font-semibold leading-snug text-fg">
         {decision.final_round && (
           <span
             data-testid="decision-final-round"
@@ -145,58 +158,112 @@ function DecisionCard({
           {decision.recommendation}
         </p>
       )}
-      <p className="mt-0.5 text-[11px] text-muted" data-testid="decision-cost">
-        Cost: {decision.cost || "unknown"}
-      </p>
+      {custom && (
+        <p className="mt-0.5 text-[11px] text-muted" data-testid="decision-cost">
+          Cost: {decision.cost || "unknown"}
+        </p>
+      )}
       {decision.cannot_run_reason ? (
         <p className="mt-0.5 text-[11px] text-warn" data-testid="decision-cannot-run">
           If approved: nothing starts. {decision.cannot_run_reason} Your answer is still recorded.
         </p>
       ) : (
-        <p className="mt-0.5 text-[11px] text-muted" data-testid="decision-plan">
+        <p className={`mt-0.5 text-[11px] text-muted ${custom ? "" : "sr-only"}`} data-testid="decision-plan">
           If approved: {describePlan(decision.on_approve)}
         </p>
       )}
-      {showNote ? (
-        <div className="mt-1.5 space-y-1">
-          <textarea
-            data-testid="decision-note"
-            className="w-full rounded border border-line bg-bg p-1 text-xs"
-            rows={4}
-            maxLength={2000}
-            placeholder="Optional note or limit, e.g. cap at 50k Helius credits"
-            aria-label="Note for the agents"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-          <label className="flex items-center gap-1 text-[11px] text-muted">
-            Budget for the follow-up run, $
-            <input
-              data-testid="decision-budget"
-              className="w-16 rounded border border-line bg-bg px-1 py-0.5 text-xs"
-              inputMode="decimal"
-              placeholder="0.50"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
-            />
-          </label>
-          {budgetBad && <p className="text-[11px] text-danger">Budget must be above $0 and at most $5.</p>}
+      {!custom && (
+        <div className="mt-2" data-testid="decision-options">
+          <p className="text-[11px] font-semibold text-muted">Pick one. No note needed.</p>
+          <div role="radiogroup" aria-label="Your answer" className="mt-1 space-y-1.5">
+            {options.map((o, i) => (
+              <button
+                key={`${o.label}-${i}`}
+                type="button"
+                role="radio"
+                aria-checked={picked === i}
+                data-testid="decision-option"
+                onClick={() => setPicked(i)}
+                className={`flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left ${
+                  picked === i ? "border-2 border-accent bg-accent-soft" : "border border-line hover:border-muted"
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full ${
+                    picked === i ? "border-4 border-accent" : "border-2 border-muted"
+                  }`}
+                />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-semibold text-fg">{o.label}</span>
+                  {o.detail && <span className="block text-[12px] text-muted">{o.detail}</span>}
+                </span>
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            data-testid="decision-send-option"
+            className={`${btn} mt-2 w-full bg-accent py-2 text-[13px] text-accent-fg`}
+            disabled={!!busy || !onAnswer}
+            onClick={() => choose(picked)}
+          >
+            Send my answer: {options[picked]?.label}
+          </button>
+          <button
+            type="button"
+            data-testid="decision-write-own"
+            className="mt-1.5 text-[11px] text-muted underline"
+            onClick={() => {
+              setCustom(true);
+              setPickedLabel(null);
+            }}
+          >
+            Write my own note instead
+          </button>
         </div>
-      ) : (
-        <button
-          type="button"
-          className="mt-1 text-[11px] underline"
-          data-testid="decision-add-note"
-          onClick={() => setShowNote(true)}
-        >
-          Add a note or budget
-        </button>
       )}
-      {follow && (
+      {custom &&
+        (showNote ? (
+          <div className="mt-1.5 space-y-1">
+            <textarea
+              data-testid="decision-note"
+              className="w-full rounded border border-line bg-bg p-1 text-xs"
+              rows={4}
+              maxLength={2000}
+              placeholder="Optional note or limit, e.g. cap at 50k Helius credits"
+              aria-label="Note for the agents"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+            <label className="flex items-center gap-1 text-[11px] text-muted">
+              Budget for the follow-up run, $
+              <input
+                data-testid="decision-budget"
+                className="w-16 rounded border border-line bg-bg px-1 py-0.5 text-xs"
+                inputMode="decimal"
+                placeholder="0.50"
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+              />
+            </label>
+            {budgetBad && <p className="text-[11px] text-danger">Budget must be above $0 and at most $5.</p>}
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="mt-1 text-[11px] underline"
+            data-testid="decision-add-note"
+            onClick={() => setShowNote(true)}
+          >
+            Add a note or budget
+          </button>
+        ))}
+      {custom && follow && (
         <button
           type="button"
           data-testid="decision-follow"
-          className={`${btn} mt-2 w-full bg-accent py-1.5 text-white`}
+          className={`${btn} mt-2 w-full bg-accent py-1.5 text-accent-fg`}
           disabled={!!busy || !onAnswer || (follow !== "decline" && budgetBad)}
           onClick={() => setConfirming(follow)}
           title={note.trim() ? "Sends the note above with your answer" : undefined}
@@ -205,50 +272,52 @@ function DecisionCard({
           {note.trim() ? " (with the note)" : ""}
         </button>
       )}
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <button
-          type="button"
-          data-testid="decision-approve"
-          className={`${btn} ${follow ? "border border-line" : "bg-accent text-white"}`}
-          disabled={!!busy || !onAnswer || budgetBad}
-          onClick={() => setConfirming("approve")}
-        >
-          {busy === "approve" ? "Starting…" : "Approve"}
-        </button>
-        <button
-          type="button"
-          data-testid="decision-more-info"
-          className={`${btn} border border-line`}
-          disabled={!!busy || !onAnswer || budgetBad}
-          onClick={() => setConfirming("more_info")}
-        >
-          Need more info
-        </button>
-        <button
-          type="button"
-          data-testid="decision-decline"
-          className={`${btn} border border-line text-danger`}
-          disabled={!!busy || !onAnswer}
-          onClick={() => setConfirming("decline")}
-        >
-          Decline
-        </button>
-        <button
-          type="button"
-          data-testid="decision-dismiss"
-          className="ml-auto text-[10px] text-muted underline disabled:opacity-50"
-          disabled={!!busy || !onAnswer}
-          onClick={() => setConfirming("dismiss")}
-          title="No longer relevant; nothing runs"
-        >
-          Dismiss
-        </button>
-      </div>
+      {custom && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            data-testid="decision-approve"
+            className={`${btn} ${follow ? "border border-line" : "bg-accent text-accent-fg"}`}
+            disabled={!!busy || !onAnswer || budgetBad}
+            onClick={() => setConfirming("approve")}
+          >
+            {busy === "approve" ? "Starting…" : "Approve"}
+          </button>
+          <button
+            type="button"
+            data-testid="decision-more-info"
+            className={`${btn} border border-line`}
+            disabled={!!busy || !onAnswer || budgetBad}
+            onClick={() => setConfirming("more_info")}
+          >
+            Need more info
+          </button>
+          <button
+            type="button"
+            data-testid="decision-decline"
+            className={`${btn} border border-line text-danger`}
+            disabled={!!busy || !onAnswer}
+            onClick={() => setConfirming("decline")}
+          >
+            Decline
+          </button>
+          <button
+            type="button"
+            data-testid="decision-dismiss"
+            className="ml-auto text-[10px] text-muted underline disabled:opacity-50"
+            disabled={!!busy || !onAnswer}
+            onClick={() => setConfirming("dismiss")}
+            title="No longer relevant; nothing runs"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {confirming && (
         <div data-testid="decision-confirm-box" className="mt-2 rounded-md border border-accent bg-accent-soft p-2">
           <p className="text-[11px] font-semibold text-fg">
-            Your answer: {FOLLOW_LABEL[confirming]}
-            {note.trim() ? " (with the note above)" : ""}
+            Your answer: {pickedLabel ?? FOLLOW_LABEL[confirming]}
+            {!pickedLabel && note.trim() ? " (with the note above)" : ""}
           </p>
           <p className="mt-0.5 text-[11px] text-fg" data-testid="decision-what-happens">
             {whatHappens(decision, confirming, budgetNum)}
@@ -257,7 +326,7 @@ function DecisionCard({
             <button
               type="button"
               data-testid="decision-confirm"
-              className={`${btn} bg-accent text-white`}
+              className={`${btn} bg-accent text-accent-fg`}
               disabled={!!busy}
               onClick={() => void send(confirming)}
             >
@@ -279,13 +348,6 @@ function DecisionCard({
     </li>
   );
 }
-
-const EDGE: Record<string, string> = {
-  approve: "#34C79A",
-  more_info: "#E3B341",
-  decline: "#F0616D",
-  none: "transparent",
-};
 
 function startsRun(d: Decision, answer: DecisionAnswer): boolean {
   if (answer === "decline" || answer === "dismiss") return false;
@@ -338,9 +400,32 @@ export function DecisionsPanel({ runs, decisions = [], onAnswer }: Props) {
   const legacy = decisions.length === 0 ? (latest?.pending_decisions ?? []) : [];
   const waitingCount = pending.length || legacy.length;
 
+  // Look A1: when something waits on the owner, the card leads with no heading above it.
+  if (pending.length > 0) {
+    return (
+      <section data-testid="decisions-panel" className="border-b border-line px-4 py-4">
+        <div data-testid="decision-waiting">
+          <ul className="space-y-3">
+            {pending.map((d) => (
+              <DecisionCard key={d.id} decision={d} onAnswer={onAnswer} />
+            ))}
+          </ul>
+        </div>
+        {decided.length > 0 && (
+          <details className="mt-3" data-testid="decision-decided">
+            <summary className="cursor-pointer text-[11px] font-semibold text-muted">
+              Recently decided ({decided.length})
+            </summary>
+            <DecidedList decided={decided} />
+          </details>
+        )}
+      </section>
+    );
+  }
+
   return (
     <PanelSection title="Decisions" count={waitingCount || withBriefs.length} testId="decisions-panel">
-      {latest && (
+      {latest && waitingCount === 0 && (
         <div className="mb-2 rounded-md border border-accent bg-accent-soft p-2 text-xs" data-testid="decision-latest">
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-accent">Latest conclusion</p>
           <p className="flex items-start gap-1.5 font-medium text-fg">
@@ -353,11 +438,9 @@ export function DecisionsPanel({ runs, decisions = [], onAnswer }: Props) {
         </div>
       )}
       <div className="mb-2" data-testid="decision-waiting">
-        <p className="mb-1 text-[11px] font-semibold text-fg">
-          Waiting on you {waitingCount > 0 && <span className="text-warn">({waitingCount})</span>}
-        </p>
+        {waitingCount === 0 && <p className="mb-1 text-[11px] font-semibold text-fg">Waiting on you</p>}
         {pending.length > 0 ? (
-          <ul className="space-y-2">
+          <ul className="space-y-3">
             {pending.map((d) => (
               <DecisionCard key={d.id} decision={d} onAnswer={onAnswer} />
             ))}
@@ -375,32 +458,40 @@ export function DecisionsPanel({ runs, decisions = [], onAnswer }: Props) {
         )}
       </div>
       {decided.length > 0 && (
-        <div className="mb-2" data-testid="decision-decided">
-          <p className="mb-1 text-[11px] font-semibold text-fg">Recently decided</p>
-          <ul className="space-y-1">
-            {decided.map((d) => (
-              <li key={d.id} data-testid="decision-decided-item" className="text-[11px]">
-                <span
-                  className={`mr-1 rounded px-1 py-0.5 text-[10px] font-medium ${
-                    d.status === "approved"
-                      ? "bg-accent-soft text-accent"
-                      : d.status === "declined"
-                        ? "text-danger"
-                        : "text-muted"
-                  }`}
-                >
-                  {STATUS_LABEL[d.status]}
-                </span>
-                <span className="text-fg">{d.question}</span>
-                {d.owner_note && <span className="block text-[10px] text-muted">Note: {d.owner_note}</span>}
-                {d.follow_up_run_id && (
-                  <span className="block text-[10px] text-muted">Follow-up run started; see the Runs tab.</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
+        <details className="mb-2" data-testid="decision-decided">
+          <summary className="cursor-pointer text-[11px] font-semibold text-muted">
+            Recently decided ({decided.length})
+          </summary>
+          <DecidedList decided={decided} />
+        </details>
       )}
     </PanelSection>
+  );
+}
+
+function DecidedList({ decided }: { decided: Decision[] }) {
+  return (
+    <ul className="mt-1 space-y-1">
+      {decided.map((d) => (
+        <li key={d.id} data-testid="decision-decided-item" className="text-[11px]">
+          <span
+            className={`mr-1 rounded px-1 py-0.5 text-[10px] font-medium ${
+              d.status === "approved"
+                ? "bg-accent-soft text-accent"
+                : d.status === "declined"
+                  ? "text-danger"
+                  : "text-muted"
+            }`}
+          >
+            {STATUS_LABEL[d.status]}
+          </span>
+          <span className="text-fg">{d.question}</span>
+          {d.owner_note && <span className="block text-[10px] text-muted">Note: {d.owner_note}</span>}
+          {d.follow_up_run_id && (
+            <span className="block text-[10px] text-muted">Follow-up run started; see the Runs tab.</span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

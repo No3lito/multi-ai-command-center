@@ -326,6 +326,8 @@ class Decision(Base):
     why: Mapped[str | None] = mapped_column(Text, nullable=True)
     recommended: Mapped[str | None] = mapped_column(String(16), nullable=True)
     suggested_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Ready-made answers: [{"label", "detail", "answer", "note"}], picked with one click.
+    options: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
     # {"on_approve": {"workflow", "worker", "goal", "attachments"}, "on_more_info": {"goal"}}
     follow_up: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     status: Mapped[str] = mapped_column(String(16), default="pending")

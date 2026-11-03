@@ -42,7 +42,12 @@ class SimulatedAdapter:
                 'buttons. No AI model wrote it and nothing will run.", '
                 '"suggested_note": "Simulated test: record my answer only.", "cost": "none", '
                 '"on_approve": {"workflow": "none", "worker": null, "goal": "", "attachments": []}, '
-                '"on_more_info": {"workflow": "none", "worker": null, "goal": ""}}]\n```'
+                '"on_more_info": {"workflow": "none", "worker": null, "goal": ""}, '
+                '"options": [{"label": "Yes, record it", "detail": "Nothing runs; your answer is saved.", '
+                '"answer": "approve", "note": "Simulated test: record my answer only."}, '
+                '{"label": "Tell me more first", "detail": "Nothing runs in this example.", '
+                '"answer": "more_info", "note": "Explain this example in one sentence."}, '
+                '{"label": "No", "detail": "Recorded as declined.", "answer": "decline", "note": ""}]}]\n```'
             )
         return ChatResponse(
             text=text,

@@ -78,6 +78,6 @@ describe("verdicts and wrap-up", () => {
     );
     expect(screen.queryByTestId("decision-plan")).not.toBeInTheDocument();
     expect(screen.getByTestId("decision-final-round")).toHaveTextContent("Final round");
-    expect(screen.getByTestId("decision-latest")).toHaveTextContent("Needs you");
+    expect(screen.getByTestId("decision-card")).toHaveTextContent("Needs you");
   });
 });

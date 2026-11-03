@@ -10,7 +10,7 @@ export function Avatar({ style, size = 28, label }: { style: SenderStyle; size?:
       role="img"
       aria-label={label}
       title={label}
-      className="inline-flex shrink-0 select-none items-center justify-center font-bold text-[#0B0F14]"
+      className="inline-flex shrink-0 select-none items-center justify-center font-bold text-[var(--avatar-ink)]"
       style={{
         width: size,
         height: size,

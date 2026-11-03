@@ -86,10 +86,12 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   await expect(runItem.getByTestId("run-spent")).toHaveText("$0.00 of $0.50");
 
   // The run ends with a decision brief, shown under Decide.
-  await tab(page, "decide");
+  // Look A1: the summary lives under History; Decide shows what needs you and a short runs list.
+  await tab(page, "history");
   await expect(page.getByTestId("summary-finished")).toContainText("1 run finished");
+  await tab(page, "decide");
+  await expect(page.getByTestId("runs-mini")).toContainText("Done");
   const decisions = page.getByTestId("decisions-panel");
-  await expect(decisions.getByTestId("decision-latest")).toBeVisible();
   await expect(decisions.getByTestId("decision-waiting")).toBeVisible();
 
   // Coordinator: four task.assign notes (plan, critique, revise, brief) and one task.result.
@@ -114,15 +116,17 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   await expect(card).toContainText("[Simulated] Example decision");
   await expect(card.getByTestId("decision-plan")).toContainText("Nothing more runs");
   await expect(card.getByTestId("decision-why")).toContainText("simulated example");
-  await expect(card.getByTestId("decision-note")).toHaveValue("Simulated test: record my answer only.");
-  await card.getByTestId("decision-note").fill("Looks good");
-  await card.getByTestId("decision-follow").click();
+  // The agents prepared ready-made answers: pick one, no note to write.
+  await expect(card.getByTestId("decision-option")).toHaveCount(3);
+  await expect(card.getByTestId("decision-option").first()).toHaveAttribute("aria-checked", "true");
+  await card.getByTestId("decision-send-option").click();
+  await expect(card.getByTestId("decision-confirm-box")).toContainText("Your answer: Yes, record it");
   await expect(card.getByTestId("decision-what-happens")).toContainText("Nothing more runs");
   await card.getByTestId("decision-confirm").click();
   await expect(decisions.getByTestId("decision-card")).toHaveCount(0);
   const decided = decisions.getByTestId("decision-decided-item");
   await expect(decided).toContainText("Approved");
-  await expect(decided).toContainText("Note: Looks good");
+  await expect(decided).toContainText("Note: Simulated test: record my answer only.");
   await expect(
     messages(page, { senderKind: "system", correlationId: runId! }).filter({ hasText: "Owner APPROVED" }),
   ).toHaveCount(1, { timeout: 10_000 });
@@ -288,7 +292,6 @@ test("projects: a new room gets its own project folder, and inbox files are file
   await expect(page.getByTestId("new-room-family")).toHaveValue("trading");
   await page.getByTestId("new-room-submit").click();
   await openRoom(page, roomName);
-  await expect(page.getByTestId("room-project")).toContainText(`Project: ${roomName}`);
 
   await tab(page, "setup");
   await expect(page.getByTestId("project-select")).toHaveValue(/^01-PROJECTS\/trading\/polymarket-bot-/);
@@ -351,7 +354,7 @@ test("send to: a plain message gets an answer from the agent picked", async ({ p
   test.setTimeout(60_000);
   await signIn(page);
   await openRoom(page, "General");
-  await page.getByRole("button", { name: "GPT", exact: true }).click();
+  await page.getByTestId("send-to").selectOption({ label: "To GPT" });
   const input = page.getByTestId("composer-input");
   await expect(input).toHaveAttribute("placeholder", "Message GPT…");
   await input.fill("what is the plan for today");

@@ -12,9 +12,11 @@ describe("MessageList with agents", () => {
     renderList([agentMsg(1)]);
     const item = screen.getByTestId("message-item");
     expect(within(item).getByTestId("simulated-badge")).toHaveTextContent(/simulated/i);
-    expect(within(item).getByTestId("message-model")).toHaveTextContent("anthropic / claude-sonnet-5-5");
-    expect(within(item).getByTestId("message-usage")).toHaveTextContent("120 in, 80 out (200 tokens)");
-    expect(within(item).getByTestId("message-usage")).toHaveTextContent("no cost (simulated)");
+    // Look A1: model, tokens and cost sit in the time's tooltip, not on screen.
+    const details = within(item).getByTestId("message-time").getAttribute("title") ?? "";
+    expect(details).toContain("anthropic / claude-sonnet-5-5");
+    expect(details).toContain("200 tokens");
+    expect(details).toContain("no cost (simulated)");
   });
 
   it("shows cost and no badge on live agent messages", () => {
@@ -22,7 +24,7 @@ describe("MessageList with agents", () => {
       agentMsg(1, { usage: { input_tokens: 10, output_tokens: 5, cost_usd: 0.0123 } }, { simulated: false }),
     ]);
     expect(screen.queryByTestId("simulated-badge")).toBeNull();
-    expect(screen.getByTestId("message-usage")).toHaveTextContent("$0.0123");
+    expect(screen.getByTestId("message-time").getAttribute("title")).toContain("$0.0123");
   });
 
   it("does not badge human messages, even if data claims simulated", () => {

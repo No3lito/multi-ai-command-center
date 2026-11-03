@@ -234,6 +234,15 @@ export interface FollowUpPlan {
 export type DecisionStatus = "pending" | "approved" | "declined" | "more_info" | "dismissed";
 export type DecisionAnswer = "approve" | "decline" | "more_info" | "dismiss";
 
+/** One ready-made answer the agents prepared for a decision. */
+export interface DecisionOption {
+  label: string;
+  detail: string;
+  answer: "approve" | "decline" | "more_info";
+  /** The instruction the agents receive with this answer. */
+  note: string;
+}
+
 /** A decision raised by a run's brief, answered by the owner on the dashboard. */
 export interface Decision {
   id: string;
@@ -248,6 +257,8 @@ export interface Decision {
   why?: string | null;
   /** The note the agents suggest attaching when following their recommendation. */
   suggested_note?: string | null;
+  /** Ready-made answers to pick instead of writing a note (best first). */
+  options?: DecisionOption[];
   cost: string | null;
   on_approve: FollowUpPlan;
   on_more_info: FollowUpPlan;

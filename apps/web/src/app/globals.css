@@ -56,6 +56,11 @@ body {
   outline-offset: 2px;
 }
 
+/* The message box shows focus on its outer border, like the A1 look. */
+.composer textarea:focus-visible {
+  outline: none;
+}
+
 .sr-only-focusable:not(:focus):not(:focus-within) {
   position: absolute;
   width: 1px;
@@ -97,37 +102,24 @@ body {
   margin-inline: auto;
 }
 
+/* Look A1: a soft bubble tinted with the speaker's own color, so you see who is talking. */
 .speaker-card {
   min-width: 0;
   max-width: min(100%, var(--chat-measure));
-  margin-block: 16px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--speaker-color);
+  padding: 12px 16px;
+  border: 0;
   border-radius: var(--radius-card);
-  background: color-mix(in srgb, var(--speaker-color) 10%, var(--panel));
+  background: color-mix(in srgb, var(--speaker-color) var(--bubble-mix), var(--panel));
   box-shadow: var(--card-shadow);
   overflow-wrap: anywhere;
 }
 
-/* Rose remains an accent only, rather than a large pink surface. */
-.speaker-card[data-accent="rose"] {
-  background: var(--panel);
-}
-
 .speaker-owner {
-  margin-left: auto;
   width: fit-content;
-  max-width: 90%;
+  max-width: 80%;
 }
 
-.speaker-continuation {
-  margin-top: -12px;
-  border-top: 0;
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
-  box-shadow: none;
-}
+
 
 
 .speaker-role {
@@ -144,25 +136,22 @@ body {
 .system-note {
   display: flex;
   gap: 8px;
-  margin-block: 8px;
-  padding: 8px;
+  margin-block: 6px;
+  padding: 2px 8px 2px 44px;
   font-size: 13px;
   line-height: 20px;
   overflow-wrap: anywhere;
 }
 
+/* Coordinator steps stay one quiet line; only errors become a card. */
 .system-action {
-  margin-block: 16px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--warn);
-  border-radius: var(--radius-card);
-  background: var(--warn-soft);
-  box-shadow: var(--card-shadow);
+  margin-block: 4px;
 }
 
 .system-action[data-note-kind="error"] {
-  border-left-color: var(--danger);
+  margin-block: 12px;
+  padding: 12px 16px;
+  border-radius: var(--radius-card);
   background: var(--danger-soft);
   color: var(--danger);
 }

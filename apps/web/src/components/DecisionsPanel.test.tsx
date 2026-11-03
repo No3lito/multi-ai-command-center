@@ -56,13 +56,16 @@ describe("DecisionsPanel", () => {
       goal: "Evaluate Grok Bot's research log\nwith details",
     });
     const older = run({ brief: "**Bottom line:** Earlier result.", pending_decisions: [] });
-    render(<DecisionsPanel runs={[latest, older]} />);
-    expect(screen.getByTestId("decision-latest")).toHaveTextContent("No edge at a 5-second delay");
-    expect(screen.getByTestId("decision-latest")).toHaveTextContent("Evaluate Grok Bot's research log");
+    const { unmount } = render(<DecisionsPanel runs={[latest, older]} />);
+    // Look A1: while something waits on the owner, it comes first and the conclusion steps aside.
+    expect(screen.queryByTestId("decision-latest")).toBeNull();
     expect(screen.getAllByTestId("decision-item").map((li) => li.textContent)).toEqual([
       "Approve the launch coverage check (Helius credits).",
     ]);
-    expect(screen.getByTestId("decision-waiting")).toHaveTextContent("(1)");
+    unmount();
+    render(<DecisionsPanel runs={[{ ...latest, pending_decisions: [] }, older]} />);
+    expect(screen.getByTestId("decision-latest")).toHaveTextContent("No edge at a 5-second delay");
+    expect(screen.getByTestId("decision-latest")).toHaveTextContent("Evaluate Grok Bot's research log");
     expect(screen.queryByTestId("decision-brief")).not.toBeInTheDocument(); // past briefs live in History
   });
 
@@ -243,5 +246,45 @@ describe("code job cards", () => {
     const proposal = decision({ on_approve: { workflow: "code", worker: null, goal: "Add a dark mode toggle" } });
     expect(describePlan(proposal.on_approve)).toMatch(/one of Claude and GPT writes the change/);
     expect(whatHappens(proposal, "approve", undefined)).toMatch(/the code job limit/);
+  });
+});
+
+describe("ready-made choices", () => {
+  const withOptions = decision({
+    question: "Run the backtest on the 37 tokens?",
+    options: [
+      { label: "Yes, all 37", detail: "About $0.40", answer: "approve", note: "Paper only." },
+      { label: "Top 10 only", detail: "About $0.15", answer: "approve", note: "Top 10 only, under $0.20." },
+      { label: "Not now", detail: "Nothing runs", answer: "decline", note: "" },
+    ],
+  });
+
+  it("sends the picked option's answer and note, after the confirm step", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn(async () => undefined);
+    render(<DecisionsPanel runs={[]} decisions={[withOptions]} onAnswer={onAnswer} />);
+    const choices = screen.getAllByTestId("decision-option");
+    expect(choices).toHaveLength(3);
+    expect(choices[0]).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByTestId("decision-approve")).toBeNull(); // the old buttons wait behind "Write my own"
+    await user.click(choices[1]!);
+    await user.click(screen.getByTestId("decision-send-option"));
+    expect(screen.getByTestId("decision-confirm-box")).toHaveTextContent("Your answer: Top 10 only");
+    await user.click(screen.getByTestId("decision-confirm"));
+    expect(onAnswer).toHaveBeenCalledWith(withOptions.id, { answer: "approve", note: "Top 10 only, under $0.20." });
+  });
+
+  it("can still write a note by hand", async () => {
+    const user = userEvent.setup();
+    render(<DecisionsPanel runs={[]} decisions={[withOptions]} onAnswer={vi.fn()} />);
+    await user.click(screen.getByTestId("decision-write-own"));
+    expect(screen.queryByTestId("decision-options")).toBeNull();
+    expect(screen.getByTestId("decision-approve")).toBeInTheDocument();
+  });
+
+  it("shows the usual buttons when the agents prepared no options", () => {
+    render(<DecisionsPanel runs={[]} decisions={[decision()]} onAnswer={vi.fn()} />);
+    expect(screen.queryByTestId("decision-options")).toBeNull();
+    expect(screen.getByTestId("decision-approve")).toBeInTheDocument();
   });
 });

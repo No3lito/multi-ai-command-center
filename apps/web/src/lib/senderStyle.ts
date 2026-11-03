@@ -37,8 +37,8 @@ export function senderStyle(sender: Speaker): SenderStyle {
     claude: "var(--speaker-claude)",
     gpt: "var(--speaker-gpt)",
     coordinator: "var(--speaker-system)",
-    grok: "var(--speaker-blue)",
-    grokbot: "var(--speaker-violet)",
+    grok: "var(--speaker-grok)",
+    grokbot: "var(--speaker-grokbot)",
     other: "var(--speaker-green)",
   };
   return {
@@ -48,6 +48,9 @@ export function senderStyle(sender: Speaker): SenderStyle {
     shape: "circle",
   };
 }
+
+/** Speakers with their own color (set in Setup > Colors); others get one from the pool. */
+const FIXED: readonly string[] = ["owner", "claude", "gpt", "grok", "grokbot", "coordinator"];
 
 const AVAILABLE = [
   "var(--speaker-blue)",
@@ -66,14 +69,14 @@ export function assignSpeakerStyles(
   // Reserve fixed identities before allocating other participants.
   const ordered = [...senders].sort((a, b) => {
     const priority = (sender: Speaker) =>
-      ["owner", "claude", "gpt", "coordinator"].includes(senderStyle(sender).key) ? 0 : 1;
+      FIXED.includes(senderStyle(sender).key) ? 0 : 1;
     return priority(a) - priority(b);
   });
   for (const sender of ordered) {
     const id = speakerId(sender);
     if (result.has(id)) continue;
     const style = senderStyle(sender);
-    const fixed = ["owner", "claude", "gpt", "coordinator"].includes(style.key);
+    const fixed = FIXED.includes(style.key);
     let color = fixed && !used.has(style.color) ? style.color : AVAILABLE.find((value) => !used.has(value));
     if (!color) {
       let index = result.size;

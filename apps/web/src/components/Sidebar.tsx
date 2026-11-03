@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Principal, Room } from "@/lib/types";
+import { familyLabel } from "@/lib/useWorkspace";
 import { Logo } from "./Logo";
 import { NewRoomForm } from "./NewRoomForm";
 import { Modal } from "./RightTabs";
@@ -30,7 +31,7 @@ export function Sidebar({ open, principal, rooms, selectedId, onSelect, onCreate
           open ? "translate-x-0" : "-translate-x-full invisible md:visible"
         }`}
       >
-        <div className="flex h-12 items-center gap-2 border-b border-line px-3">
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
           <Logo />
           <span className="truncate text-sm font-semibold">Multi-AI Command Center</span>
         </div>
@@ -47,7 +48,6 @@ export function Sidebar({ open, principal, rooms, selectedId, onSelect, onCreate
             </span>
             New project
           </button>
-          <h2 className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted">Rooms</h2>
 
           {rooms.kind === "loading" && <p className="px-2 py-1 text-muted">Loading rooms...</p>}
 
@@ -65,32 +65,38 @@ export function Sidebar({ open, principal, rooms, selectedId, onSelect, onCreate
           )}
 
           {rooms.kind === "ready" && rooms.rooms.length > 0 && (
-            <ul data-testid="room-list" className="space-y-px">
-              {rooms.rooms.map((room) => {
-                const active = room.id === selectedId;
-                return (
-                  <li key={room.id}>
-                    <button
-                      type="button"
-                      data-testid="room-item"
-                      data-room-id={room.id}
-                      aria-current={active ? "page" : undefined}
-                      onClick={() => onSelect(room.id)}
-                      className={`flex min-h-10 w-full items-center gap-2 rounded-lg border-l-2 px-2 text-left active:bg-line disabled:text-[var(--disabled)] ${
-                        active
-                          ? "border-accent bg-accent-soft font-semibold text-fg"
-                          : "border-transparent text-muted hover:bg-panel-2 hover:text-fg"
-                      }`}
-                    >
-                      <span aria-hidden="true" className="text-muted">
-                        #
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">{room.name}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <div data-testid="room-list" className="space-y-3">
+              {groupRooms(rooms.rooms).map((group) => (
+                <section key={group.family} aria-label={group.label}>
+                  <h2 className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    {group.label}
+                  </h2>
+                  <ul className="space-y-px">
+                    {group.rooms.map((room) => {
+                      const active = room.id === selectedId;
+                      return (
+                        <li key={room.id}>
+                          <button
+                            type="button"
+                            data-testid="room-item"
+                            data-room-id={room.id}
+                            aria-current={active ? "page" : undefined}
+                            onClick={() => onSelect(room.id)}
+                            className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left active:bg-line disabled:text-[var(--disabled)] ${
+                              active
+                                ? "bg-accent-soft font-semibold text-fg"
+                                : "text-muted hover:bg-panel-2 hover:text-fg"
+                            }`}
+                          >
+                            <span className="min-w-0 flex-1 truncate">{room.name}</span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              ))}
+            </div>
           )}
         </nav>
 
@@ -121,4 +127,21 @@ export function Sidebar({ open, principal, rooms, selectedId, onSelect, onCreate
       )}
     </>
   );
+}
+
+/** Rooms grouped by their project's family (01-PROJECTS/<family>/<project>); rooms with no
+ * project go last, under "Other". Families keep the order they first appear in. */
+export function groupRooms(rooms: readonly Room[]): { family: string; label: string; rooms: Room[] }[] {
+  const groups = new Map<string, Room[]>();
+  for (const room of rooms) {
+    const parts = (room.project_path ?? "").split("/");
+    const family = parts.length >= 3 && parts[1] ? parts[1] : "";
+    groups.set(family, [...(groups.get(family) ?? []), room]);
+  }
+  const named = [...groups.entries()].filter(([f]) => f !== "");
+  const other = groups.get("") ?? [];
+  return [
+    ...named.map(([family, list]) => ({ family, label: familyLabel(family), rooms: list })),
+    ...(other.length ? [{ family: "", label: named.length ? "Other" : "Rooms", rooms: other }] : []),
+  ];
 }

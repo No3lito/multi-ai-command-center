@@ -1,4 +1,4 @@
-/* Phase 1: light-only dashboard tokens. */
+/* Look A1 tokens: dark by default, light with data-theme="light" on <html>. */
 :root {
   --space-1: 4px;
   --space-2: 8px;
@@ -10,7 +10,7 @@
   --radius-card: 12px;
   --radius-control: 8px;
   --content-max: 1280px;
-  --sidebar-w: 208px;
+  --sidebar-w: 240px;
   --sidebar-w-collapsed: 64px;
   --drawer-w: 280px;
   --chat-measure: 72ch;
@@ -30,36 +30,99 @@
   --text-label: 12px;
   --lh-label: 16px;
 
-  --speaker-owner: #334155;
-  --speaker-claude: #B45309;
-  --speaker-gpt: #0F766E;
+  /* Look A1, dark (the default). Speaker colors are each AI's identity; never reuse them. */
+  --speaker-owner: #4C9AFF;
+  --speaker-claude: #E8955A;
+  --speaker-gpt: #34C79A;
+  --speaker-blue: #7FB5FF;
+  --speaker-violet: #A78BFA;
+  --speaker-green: #8FE3A8;
+  --speaker-rose: #F28BA8;
+  --speaker-system: #8B95A5;
+  /* Color choices for speakers (Setup > Colors). Each has a light-mode shade below. */
+  --swatch-orange: #E8955A;
+  --swatch-green: #34C79A;
+  --swatch-blue: #4C9AFF;
+  --swatch-sky: #38BDF8;
+  --swatch-violet: #A78BFA;
+  --swatch-pink: #F28BA8;
+  --swatch-yellow: #F5C451;
+  --swatch-red: #FF8A80;
+  --swatch-teal: #2DD4BF;
+  --swatch-gray: #B6BFCC;
+  --speaker-grok: var(--swatch-sky);
+  --speaker-grokbot: var(--swatch-violet);
+  --bubble-mix: 16%;
+  --avatar-ink: #0B0F14;
+
+  --accent: #4C9AFF;
+  --accent-ink: #8FC0FF;
+  --accent-fg: #06101F;
+  --accent-soft: #1E2C42;
+  --focus: #7FB5FF;
+  --ok: #52D9AE;
+  --warn: #F5C451;
+  --danger: #FF9B9B;
+  --ok-soft: #123A2C;
+  --warn-soft: #2A2412;
+  --danger-soft: #3A1717;
+
+  --bg: #0E131B;
+  --sidebar: #111720;
+  --panel: #121924;
+  --panel-2: #1A2330;
+  --border: #263142;
+  --text: #E6EAF0;
+  --muted: #A7B0BE;
+  --disabled: #7A8494;
+  --card-shadow: none;
+  color-scheme: dark;
+}
+
+/* Look A1, light. Same layout; darker speaker colors so text on light passes contrast. */
+:root[data-theme="light"] {
+  --speaker-owner: #1D4ED8;
+  --speaker-claude: #B4531A;
+  --speaker-gpt: #0B6648;
   --speaker-blue: #1D4ED8;
-  --speaker-violet: #6D28D9;
+  --speaker-violet: #5B3BB8;
   --speaker-green: #15803D;
   --speaker-rose: #BE123C;
-  --speaker-system: #475569;
+  --speaker-system: #5A6273;
+  --swatch-orange: #B4531A;
+  --swatch-green: #0B6648;
+  --swatch-blue: #1D4ED8;
+  --swatch-sky: #0369A1;
+  --swatch-violet: #5B3BB8;
+  --swatch-pink: #BE123C;
+  --swatch-yellow: #8A5A00;
+  --swatch-red: #B91C1C;
+  --swatch-teal: #0F766E;
+  --swatch-gray: #4B5563;
+  --bubble-mix: 10%;
+  --avatar-ink: #FFFFFF;
 
-  --accent: #0F766E;
-  --accent-ink: #115E59;
+  --accent: #1D4ED8;
+  --accent-ink: #1D4ED8;
   --accent-fg: #FFFFFF;
-  --accent-soft: #E6F3F0;
+  --accent-soft: #E8EEFC;
   --focus: #1D4ED8;
-  --ok: #166534;
-  --warn: #92400E;
+  --ok: #0B6648;
+  --warn: #8A5A00;
   --danger: #B91C1C;
-  --ok-soft: #F0FDF4;
-  --warn-soft: #FFFBEB;
+  --ok-soft: #E1F6EE;
+  --warn-soft: #FFF8E6;
   --danger-soft: #FEF2F2;
 
-  --bg: #F8FAFC;
-  --sidebar: #FFFFFF;
+  --bg: #F4F5F7;
+  --sidebar: #FAFBFC;
   --panel: #FFFFFF;
-  --panel-2: #F1F5F9;
-  --border: #CBD5E1;
-  --text: #0F172A;
-  --muted: #475569;
-  --disabled: #64748B;
-  --card-shadow: 0 2px 8px rgb(15 23 42 / 0.06);
+  --panel-2: #F1F3F6;
+  --border: #E1E4EA;
+  --text: #1C2230;
+  --muted: #5A6273;
+  --disabled: #6B7280;
+  --card-shadow: 0 1px 2px rgb(20 30 50 / 0.06);
   color-scheme: light;
 }
 
@@ -69,4 +132,3 @@
   }
 }
 
-/* Dark mode is intentionally deferred to Phase 2. */

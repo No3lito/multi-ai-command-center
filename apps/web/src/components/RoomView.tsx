@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, isApiError } from "@/lib/api";
-import { isRunActive, type Agent, type CodeJobs, type Room, type RoomDetail } from "@/lib/types";
+import { isRunActive, type Agent, type CodeJobs, type Room, type RoomDetail, type Run } from "@/lib/types";
+import { formatUsd } from "@/lib/format";
 import { useAgents } from "@/lib/useAgents";
 import { useDecisions } from "@/lib/useDecisions";
 import { speakerId } from "@/lib/senderStyle";
@@ -23,6 +24,8 @@ import { SummaryPanel, lastSeenFor } from "./SummaryPanel";
 import { CollabForm } from "./CollabForm";
 import { Composer, composerDeliveryState, type MentionAgent } from "./Composer";
 import { ConnectionPill } from "./ConnectionPill";
+import { ThemeToggle } from "./ThemeToggle";
+import { SpeakerColorsPanel } from "./SpeakerColorsPanel";
 import { MessageList } from "./MessageList";
 import { RightPanel } from "./RightPanel";
 import { RunsPanel } from "./RunsPanel";
@@ -174,12 +177,12 @@ export function RoomView(props: Props) {
   const roomName = detail.kind === "ready" ? detail.detail.name : (roomSummary?.name ?? "");
   const memberCount = detail.kind === "ready" ? detail.detail.member_count : roomSummary?.member_count;
 
-  const participantStyles = useSpeakerStyles([
-    ...(roomDetail?.members ?? []),
-    ...stream.messages.map((message) => message.sender),
-  ], outbox.pending.length > 0);
+  const participantStyles = useSpeakerStyles(
+    [...(roomDetail?.members ?? []), ...stream.messages.map((message) => message.sender)],
+    outbox.pending.length > 0,
+  );
   const header = (
-    <header className="room-header sticky top-0 z-20 flex min-h-16 shrink-0 flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2">
+    <header className="room-header z-20 flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2">
       <button
         type="button"
         onClick={onToggleLeft}
@@ -192,24 +195,26 @@ export function RoomView(props: Props) {
       <div className="min-w-0 flex-1">
         {roomId && roomName ? (
           <h1 className="flex items-baseline gap-2 truncate">
+            <span aria-hidden="true" className="hidden text-muted md:inline">
+              /
+            </span>
             <span className="truncate font-semibold">
               <span aria-hidden="true" className="mr-1 font-mono text-muted">
                 #
               </span>
               {roomName}
             </span>
-            {roomDetail?.project_path && (
+            {roomDetail && (
               <span
-                data-testid="room-project"
-                title={roomDetail.project_path}
-                className="shrink-0 rounded bg-panel-2 px-1.5 py-px text-[11px] text-muted"
+                data-testid="room-members"
+                aria-label={`${memberCount ?? roomDetail.members.length} members`}
+                className="flex shrink-0 items-center gap-1 self-center"
               >
-                Project: {projectTitle(workspace, roomDetail.project_path)}
-              </span>
-            )}
-            {memberCount !== undefined && (
-              <span className="shrink-0 text-xs text-muted">
-                {memberCount} {memberCount === 1 ? "member" : "members"}
+                {roomDetail.members.map((member) => (
+                  <span key={member.id} className="flex">
+                    <Avatar style={participantStyles.get(speakerId(member))!} label={member.display_name} size={22} />
+                  </span>
+                ))}
               </span>
             )}
           </h1>
@@ -217,12 +222,18 @@ export function RoomView(props: Props) {
           <h1 className="font-semibold text-muted">No room selected</h1>
         )}
       </div>
+      {usage.usage && (
+        <span data-testid="header-spend" className="hidden shrink-0 text-xs text-muted sm:inline">
+          Spent {formatUsd(usage.usage.spent_usd)} of {formatUsd(usage.usage.cap_usd)}
+        </span>
+      )}
+      <ThemeToggle />
       {roomId && !notFound && detail.kind === "ready" && (
         <button
           type="button"
           data-testid="new-goal"
           onClick={() => setGoalOpen(true)}
-          className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90"
+          className="min-h-9 shrink-0 rounded-md bg-accent px-3.5 text-sm font-semibold text-accent-fg hover:opacity-90"
         >
           New goal
         </button>
@@ -305,47 +316,42 @@ export function RoomView(props: Props) {
   }
 
   return (
-    <>
-      <main className="flex min-w-0 flex-1 flex-col bg-bg">
-        {header}
-        {roomDetail && (
-          <ul aria-label="Participants" data-testid="room-members" className="participant-strip">
-            {roomDetail.members.map((member) => (
-              <li key={member.id} className="flex shrink-0 items-center gap-2">
-                <Avatar
-                  style={participantStyles.get(speakerId(member))!}
-                  label={member.display_name}
-                  size={24}
-                />
-                <span>{member.display_name}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {body}
-      </main>
-      <RightPanel
-        open={rightOpen}
-        detail={detail.kind === "ready" ? detail.detail : null}
-        status={stream.status}
-        lastSeq={stream.lastSeq}
-        hasRoom={!!roomId && !notFound}
-        showDetails={tab === "setup"}
-      >
-        {roomDetail && !notFound && roomId && (
-          <RightTabs
-            tab={tab}
-            onChange={setTab}
-            badges={{
-              decide: decisions.decisions.filter((d) => d.status === "pending").length,
-              runs: runs.runs.filter((r) => isRunActive(r) && !r.archived_at).length,
-            }}
-          />
-        )}
-        {roomDetail && !notFound && roomId &&
-          (runs.runs.length > 0 || decisions.decisions.length > 0) && (
-            <details open className="task-progress">
-              <summary>Tasks and progress</summary>
+    <div className="flex min-w-0 flex-1 flex-col">
+      {header}
+      <div className="flex min-h-0 flex-1">
+        <main className="flex min-w-0 flex-1 flex-col bg-bg">{body}</main>
+        <RightPanel
+          open={rightOpen}
+          detail={detail.kind === "ready" ? detail.detail : null}
+          status={stream.status}
+          lastSeq={stream.lastSeq}
+          hasRoom={!!roomId && !notFound}
+          showDetails={tab === "setup"}
+        >
+          {roomDetail && !notFound && roomId && tab === "decide" && (
+            <div role="tabpanel" id="tabpanel-decide" aria-labelledby="tab-decide">
+              <DecisionsPanel runs={runs.runs} decisions={decisions.decisions} onAnswer={onAnswer} />
+              <RunsMini runs={runs.runs} agentName={agentName} onAll={() => setTab("runs")} />
+              <InboxPanel workspace={workspace} onFile={fileInbox} />
+            </div>
+          )}
+          {(tab === "runs" || !roomDetail || notFound) && (
+            <div role="tabpanel" id="tabpanel-runs" aria-labelledby="tab-runs">
+              <RunsPanel
+                hasRoom={!!roomDetail && !notFound}
+                runs={runs.runs}
+                loaded={runs.loaded}
+                error={runs.error}
+                agentName={agentName}
+                onCancel={runs.cancel}
+                onWrapUp={runs.wrapUp}
+                onTryAgain={runs.tryAgain}
+                onRetry={runs.reload}
+              />
+            </div>
+          )}
+          {roomDetail && !notFound && roomId && tab === "history" && (
+            <div role="tabpanel" id="tabpanel-history" aria-labelledby="tab-history">
               <SummaryPanel
                 runs={runs.runs}
                 decisions={decisions.decisions}
@@ -353,68 +359,61 @@ export function RoomView(props: Props) {
                 since={lastSeenFor(roomId)}
                 agentName={agentName}
               />
-            </details>
+              <HistoryPanel
+                roomId={roomId}
+                client={api}
+                onRunChanged={addRun}
+                refreshKey={runs.runs
+                  .filter((r) => !isRunActive(r))
+                  .map((r) => `${r.id}:${r.updated_at}`)
+                  .join(",")}
+              />
+            </div>
           )}
-        {roomDetail && !notFound && roomId && tab === "decide" && (
-          <div role="tabpanel" id="tabpanel-decide" aria-labelledby="tab-decide">
-            <DecisionsPanel runs={runs.runs} decisions={decisions.decisions} onAnswer={onAnswer} />
-            <InboxPanel workspace={workspace} onFile={fileInbox} />
-          </div>
-        )}
-        {(tab === "runs" || !roomDetail || notFound) && (
-          <div role="tabpanel" id="tabpanel-runs" aria-labelledby="tab-runs">
-            <RunsPanel
-              hasRoom={!!roomDetail && !notFound}
-              runs={runs.runs}
-              loaded={runs.loaded}
-              error={runs.error}
-              agentName={agentName}
-              onCancel={runs.cancel}
-              onWrapUp={runs.wrapUp}
-              onTryAgain={runs.tryAgain}
-              onRetry={runs.reload}
-            />
-          </div>
-        )}
-        {roomDetail && !notFound && roomId && tab === "history" && (
-          <div role="tabpanel" id="tabpanel-history" aria-labelledby="tab-history">
-            <HistoryPanel
-              roomId={roomId}
-              client={api}
-              onRunChanged={addRun}
-              refreshKey={runs.runs
-                .filter((r) => !isRunActive(r))
-                .map((r) => `${r.id}:${r.updated_at}`)
-                .join(",")}
-            />
-          </div>
-        )}
-        {tab === "setup" && (
-          <div role="tabpanel" id="tabpanel-setup" aria-labelledby="tab-setup">
-            {roomDetail && !notFound && (
-              <ProjectPanel workspace={workspace} projectPath={roomDetail.project_path ?? null} onChange={setProject} />
-            )}
-            <AgentsPanel
-              hasRoom={!!roomDetail && !notFound}
-              loading={agentsHook.state.kind === "loading"}
-              error={agentsHook.state.kind === "error" ? agentsHook.state.message : null}
-              roomAgents={roomAgents}
-              otherAgents={otherAgents}
-              onAdd={addAgent}
-              onRetry={agentsHook.reload}
-            />
-            <UsagePanel usage={usage.usage} error={usage.error} />
-            <ConnectionsPanel
-              api={api}
-              roomId={roomDetail && !notFound ? roomId : null}
-              roomName={roomDetail?.name ?? null}
-              memberIds={memberIds}
-              onAddToRoom={addAgent}
-              onChanged={reloadDetail}
-            />
-          </div>
-        )}
-      </RightPanel>
+          {tab === "setup" && (
+            <div role="tabpanel" id="tabpanel-setup" aria-labelledby="tab-setup">
+              <SpeakerColorsPanel />
+              {roomDetail && !notFound && (
+                <ProjectPanel
+                  workspace={workspace}
+                  projectPath={roomDetail.project_path ?? null}
+                  onChange={setProject}
+                />
+              )}
+              <AgentsPanel
+                hasRoom={!!roomDetail && !notFound}
+                loading={agentsHook.state.kind === "loading"}
+                error={agentsHook.state.kind === "error" ? agentsHook.state.message : null}
+                roomAgents={roomAgents}
+                otherAgents={otherAgents}
+                onAdd={addAgent}
+                onRetry={agentsHook.reload}
+              />
+              <UsagePanel usage={usage.usage} error={usage.error} />
+              <ConnectionsPanel
+                api={api}
+                roomId={roomDetail && !notFound ? roomId : null}
+                roomName={roomDetail?.name ?? null}
+                memberIds={memberIds}
+                onAddToRoom={addAgent}
+                onChanged={reloadDetail}
+              />
+            </div>
+          )}
+          {roomDetail && !notFound && roomId && (
+            <div className="sticky bottom-0 mt-auto border-t border-line bg-panel">
+              <RightTabs
+                tab={tab}
+                onChange={setTab}
+                badges={{
+                  decide: decisions.decisions.filter((d) => d.status === "pending").length,
+                  runs: runs.runs.filter((r) => isRunActive(r) && !r.archived_at).length,
+                }}
+              />
+            </div>
+          )}
+        </RightPanel>
+      </div>
       {goalOpen && roomDetail && !notFound && roomId && (
         <Modal
           title={`New goal · ${roomName}${
@@ -443,7 +442,7 @@ export function RoomView(props: Props) {
           />
         </Modal>
       )}
-    </>
+    </div>
   );
 }
 
@@ -504,5 +503,72 @@ function PanelIcon() {
       <rect x="2" y="3" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.6" />
       <path d="M11 3v12" stroke="currentColor" strokeWidth="1.6" />
     </svg>
+  );
+}
+
+/** Look A1: the last few runs under the decision card; the Runs tab has the full list. */
+function RunsMini({
+  runs,
+  agentName,
+  onAll,
+}: {
+  runs: readonly Run[];
+  agentName: (id: string | null) => string | null;
+  onAll: () => void;
+}) {
+  const live = runs.filter((r) => !r.archived_at);
+  const shown = [...live.filter(isRunActive), ...live.filter((r) => !isRunActive(r))].slice(0, 3);
+  if (shown.length === 0) return null;
+  const label: Record<string, string> = {
+    queued: "Queued",
+    running: "Running",
+    waiting: "Waiting",
+    completed: "Done",
+    failed: "Failed",
+    cancelled: "Cancelled",
+    budget_exceeded: "Over budget",
+  };
+  const kind: Record<string, string> = {
+    collab: "Collaborate",
+    build: "Design & build",
+    review: "Review",
+    code: "Code change",
+    reply: "Reply",
+  };
+  return (
+    <section data-testid="runs-mini" className="border-b border-line px-4 py-4">
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted">Runs</h2>
+        <button type="button" onClick={onAll} className="text-xs text-muted underline hover:text-fg">
+          See all
+        </button>
+      </div>
+      <ul className="space-y-2">
+        {shown.map((r) => (
+          <li key={r.id} className="rounded-lg border border-line bg-panel-2 px-3 py-2">
+            <div className="flex items-center gap-2 text-[11px]">
+              <span
+                className={`rounded-full px-2 py-px font-medium ${
+                  isRunActive(r)
+                    ? "bg-accent-soft text-accent-ink"
+                    : r.status === "completed"
+                      ? "bg-ok-soft text-ok"
+                      : "bg-danger-soft text-danger"
+                }`}
+              >
+                {label[r.status] ?? r.status}
+              </span>
+              <span className="text-muted">{kind[r.kind] ?? r.kind}</span>
+            </div>
+            <p className="mt-1 line-clamp-2 text-[13px] text-fg">{(r.goal ?? "").split("\n")[0]}</p>
+            <p className="mt-0.5 text-[11px] text-muted">
+              {isRunActive(r) ? `${r.turn_count ?? 0} of ${r.max_turns ?? 0} turns · ` : ""}
+              {formatUsd(r.spent_usd)} of {formatUsd(r.budget_usd)}
+              {r.kind === "code" && agentName(r.planner_id) ? ` · ${agentName(r.planner_id)} writes` : ""}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
