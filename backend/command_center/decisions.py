@@ -425,6 +425,36 @@ async def _previous_run_note(session: AsyncSession, source: models.Run) -> files
     )
 
 
+async def discussion_context(session: AsyncSession, source: models.Run, limit: int = 30_000) -> str | None:
+    """What a code job must know from the run that proposed it: that run's final work message
+    (for example the revised plan or spec, all of its parts) and its brief."""
+    rows = (
+        await session.execute(
+            select(models.Message.idempotency_key, models.Message.body_text)
+            .join(models.Principal, models.Principal.id == models.Message.sender_id)
+            .where(
+                models.Message.correlation_id == source.id, models.Principal.kind.in_(("agent", "external"))
+            )
+            .order_by(models.Message.seq)
+        )
+    ).all()
+    steps: dict[str, list[str]] = {}
+    for key, text in rows:
+        step = (key or "").split(":reply", 1)[0]
+        if step.endswith(":brief"):
+            continue
+        steps.setdefault(step, []).append(text or "")
+    work = "\n".join(list(steps.values())[-1]) if steps else ""
+    if not work and not source.brief:
+        return None
+    text = f"Goal of that discussion: {source.goal.strip()[:1500]}\n\n"
+    if work:
+        text += f"## Its final work (follow this)\n{work[:limit]}\n\n"
+    if source.brief:
+        text += f"## Its brief\n{source.brief[:6000]}\n"
+    return text
+
+
 async def code_pair(
     session: AsyncSession, room_id: str, settings: Settings | None
 ) -> tuple[models.Principal, models.Principal] | None:
@@ -481,12 +511,16 @@ async def _start_code_job(
     if note and not pr:
         goal += f"\nOwner's note (every sentence is a requirement): {note.strip()}"
     state: dict[str, Any] | None = None
+    if not pr:
+        # The job must see what was agreed (the spec or plan), not only the card's one-line goal.
+        context = await discussion_context(session, source)
+        state = {"context": context} if context else None
     if pr and source.kind == "code" and source.code_state:
         writer_id, reviewer_id = source.planner_id, source.critic_id
         state = {
             k: v
             for k, v in source.code_state.items()
-            if k in ("base", "base_sha", "branch", "head_sha", "pr", "files", "touched")
+            if k in ("base", "base_sha", "branch", "head_sha", "pr", "files", "touched", "context")
         }
         state.update(
             round=1, owner_note=(note or "Address the remaining review points and make the tests pass.")

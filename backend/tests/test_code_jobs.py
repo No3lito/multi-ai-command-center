@@ -576,3 +576,54 @@ async def test_a_code_job_stops_when_its_budget_is_used(world: dict[str, Any]) -
     run, _ = await code_job(world, Scripted([FIX_SIGN], []), repo, budget_usd=Decimal("0.05"))
     assert run.status == "budget_exceeded" and "No request was sent" in (run.error or "")
     assert len(repo.prs) == 0
+
+
+async def test_a_job_from_a_discussion_sees_the_agreed_spec(world: dict[str, Any]) -> None:  # noqa: F811
+    """Approving a card that a Collaborate run raised starts a code job that reads that run's
+    final spec (all its parts), not only the card's one-line goal."""
+    from command_center.messaging import service
+
+    claude, gpt = world["agents"]["Claude"], world["agents"]["GPT"]
+    source = await add_run(
+        world, kind="collab", step="done", status="completed", planner_id=claude.id, critic_id=gpt.id,
+        agent_id=None, goal="Propose a modern look",
+        brief="**Verdict:** Needs you.\n**Bottom line:** Spec v2.",
+    )  # fmt: skip
+    async with world["sm"]() as s:
+        for sender, key, text in [
+            (claude, "plan:reply", "First draft"),
+            (gpt, "critique:reply", "Make the cards flatter"),
+            (claude, "revise:reply", "SPEC v2: cards 12px radius, body 15px"),
+            (claude, "revise:reply:2", "SPEC v2 part 2: sidebar 248px"),
+            (claude, "brief:reply", "**Verdict:** Needs you."),
+        ]:
+            await service.append_message(
+                s, world["room"].id, sender, kind="chat", text=text, idempotency_key=f"{source.id}:{key}",
+                correlation_id=source.id,
+            )  # fmt: skip
+        card = models.Decision(
+            id=new_id("dec"), room_id=world["room"].id, run_id=source.id, question="Apply the v2 spec?",
+            follow_up={"on_approve": {"workflow": "code", "goal": "Apply the v2 visual spec"}},
+            status="pending",
+        )  # fmt: skip
+        s.add(card)
+        await s.commit()
+        follow = await decisions.start_follow_up(
+            s, cfg(world["url"], github_token=SecretStr("t")), card, answer="approve", note=None,
+            owner_id=world["owner"].id, budget_usd=None,
+        )  # fmt: skip
+        await s.commit()
+    job = follow.run
+    assert job is not None and job.kind == "code" and job.step == "scope"
+    context = (job.code_state or {})["context"]
+    assert "cards 12px radius" in context and "sidebar 248px" in context and "First draft" not in context
+    adapter = Scripted(writes=[FIX_SIGN], reviews=["Good.\nVERDICT: APPROVE"])
+    port = await port_for(world["sm"], cfg(world["url"]), adapter)
+    with fake_github(FakeRepo(SAMPLE_FILES)) as gh:
+        engine = BuiltinEngine(world["sm"], port, world["coordinator"], Decimal("0.25"), simulated=False,
+                               github=gh, code_ci_wait_seconds=5, code_ci_poll_seconds=0.01)  # fmt: skip
+        for _ in range(20):
+            if not await engine.step(job.id):
+                break
+    assert [k for k, _ in adapter.prompts] == ["scope", "write", "review"]
+    assert all("sidebar 248px" in prompt for _, prompt in adapter.prompts)
