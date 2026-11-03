@@ -39,6 +39,7 @@ services:
       PROVIDER_MODE: ${PROVIDER_MODE:-live}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
       LIVE_BUDGET_USD: ${LIVE_BUDGET_USD:-10.00}
     ports:
       - "127.0.0.1:8000:8000"

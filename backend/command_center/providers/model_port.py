@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -32,7 +33,7 @@ from command_center.db import models
 from command_center.ids import new_id
 from command_center.providers.anthropic_adapter import AnthropicAdapter
 from command_center.providers.base import ChatRequest, ChatResponse, ProviderAdapter, ProviderError
-from command_center.providers.openai_adapter import OpenAIAdapter
+from command_center.providers.openai_adapter import OpenAIAdapter, XAIAdapter
 from command_center.providers.prices import Price, estimate_input_tokens, price_for
 from command_center.providers.simulated import SimulatedAdapter
 
@@ -100,6 +101,10 @@ class ModelPort:
             return AnthropicAdapter(api_key)
         if provider == "openai":
             return OpenAIAdapter(api_key)
+        if provider == "xai":
+            # XAI_BASE_URL exists for tests against a local fake server, like the SDKs' own
+            # ANTHROPIC_BASE_URL / OPENAI_BASE_URL; the app warns at startup when any is set.
+            return XAIAdapter(api_key, base_url=os.environ.get("XAI_BASE_URL") or None)
         raise ProviderNotReady("unknown_provider", f"Unknown provider {provider}")
 
     def _adapter(self, provider: str) -> ProviderAdapter:

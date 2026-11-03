@@ -2,9 +2,21 @@
 
 Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
 
-## Milestone B: live AI collaboration (in review)
+## Grok agent and design & build workflow (in review, PR #5)
 
-Branch: `agent/claude/milestone-b`, draft PR #4. Not merged until the owner approves. Contract: [`docs/api/milestone-b.md`](api/milestone-b.md).
+Branch: `agent/claude/grok-agent`.
+
+- **Grok (xAI)** is a third agent with the role Builder, on `grok-build-0.1`. It is seeded once on existing installs and sits behind the same spending cap.
+- **Design & build:** following the owner's direction, Claude and GPT are equal co-designers with one goal. Grok follows their design exactly, including code, and adds only minor input. GPT checks the build, and Grok applies any fixes.
+
+Evidence:
+
+- Mocked adapter tests.
+- Fake-provider runs of the full workflow: `backend/tests/test_grok.py` and `test_build_workflow.py`.
+- A simulated browser test.
+- **Real xAI API: pending the owner's `XAI_API_KEY`.**
+
+## Milestone B: live AI collaboration (accepted, merged in PR #4) Contract: [`docs/api/milestone-b.md`](api/milestone-b.md).
 
 ### Evidence labels
 

@@ -15,7 +15,7 @@ import pytest
 
 from command_center.providers.anthropic_adapter import AnthropicAdapter
 from command_center.providers.base import ChatMessage, ChatRequest, ProviderError
-from command_center.providers.openai_adapter import OpenAIAdapter
+from command_center.providers.openai_adapter import OpenAIAdapter, XAIAdapter
 from command_center.providers.prices import estimate_input_tokens, price_for
 
 REQ = ChatRequest(
@@ -119,6 +119,49 @@ async def test_openai_request_shape_and_usage() -> None:
     assert body["max_output_tokens"] == 64
     assert body["store"] is False
     assert body["input"] == [{"role": "user", "content": "Say hello."}]
+
+
+async def test_xai_request_shape_and_usage() -> None:
+    """MOCKED: Grok goes to api.x.ai with the system prompt as a system message, store=false,
+    and reasoning tokens (reported separately by xAI) are billed as output."""
+    seen: list[httpx2.Request] = []
+    body_in = json.loads(json.dumps(OPENAI_OK))
+    body_in["model"] = "grok-4.7"
+    body_in["usage"]["output_tokens_details"] = {"reasoning_tokens": 40}
+    adapter = XAIAdapter("xai-test", http_client=httpx2.AsyncClient(transport=transport(200, body_in, seen)))
+    resp = await adapter.generate(
+        ChatRequest(model="grok-4.7", system=REQ.system, messages=REQ.messages, max_output_tokens=64)
+    )
+    assert resp.text == "Hello from a fabricated response."
+    assert (resp.input_tokens, resp.output_tokens) == (30, 9 + 40)
+    req = seen[0]
+    assert str(req.url) == "https://api.x.ai/v1/responses"
+    assert req.headers["authorization"] == "Bearer xai-test"
+    body = json.loads(req.content)
+    assert "instructions" not in body
+    assert body["input"] == [
+        {"role": "system", "content": "You are a test agent."},
+        {"role": "user", "content": "Say hello."},
+    ]
+    assert body["store"] is False and body["max_output_tokens"] == 64
+
+
+async def test_xai_errors_name_xai() -> None:
+    adapter = XAIAdapter("bad", http_client=httpx2.AsyncClient(transport=transport(401, {}, [])))
+    with pytest.raises(ProviderError) as info:
+        await adapter.generate(REQ)
+    assert info.value.code == "auth_failed" and "xAI" in info.value.message
+
+
+def test_grok_prices_and_long_context() -> None:
+    p = price_for("xai", "grok-4.20-0309-non-reasoning")
+    assert p is not None
+    # $1.25 / $2.50 per 1M below 200k prompt tokens; $2.50 / $5.00 from 200k on (all tokens).
+    assert str(p.cost(1_000_000, 0)) == "2.500000"  # 1M prompt tokens: long-context rate
+    assert str(p.cost(199_999, 0)) == "0.249999"
+    assert str(p.cost(200_000, 0)) == "0.500000"
+    assert str(p.cost(1000, 1000)) == "0.003750"
+    assert price_for("xai", "grok-4.7") is not None
 
 
 @pytest.mark.parametrize(

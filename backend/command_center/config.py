@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     provider_mode: Literal["live", "simulated"] = "live"
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
+    xai_api_key: SecretStr | None = None
     # Instance-wide cap on real API spend, enforced before every paid request.
     live_budget_usd: float = Field(default=10.0, ge=0, le=1000)
     run_workers: int = Field(default=2, ge=1, le=16)
@@ -57,6 +58,9 @@ class Settings(BaseSettings):
     max_runs_per_tree: int = Field(default=10, ge=1, le=100)
     default_claude_model: str = "claude-sonnet-5-5"
     default_openai_model: str = "gpt-6.1-sol"
+    # Grok is the builder: xAI's coding model by default (cheapest Grok text model, $1/$2 per
+    # 1M). Switch the agent to grok-4.7 at will (a reasoning model, so less predictable cost).
+    default_grok_model: str = "grok-build-0.1"
     log_level: str = "INFO"
 
     @field_validator("owner_password")
@@ -88,7 +92,11 @@ class Settings(BaseSettings):
         return sorted(hosts)
 
     def api_key_for(self, provider: str) -> str | None:
-        secret = {"anthropic": self.anthropic_api_key, "openai": self.openai_api_key}.get(provider)
+        secret = {
+            "anthropic": self.anthropic_api_key,
+            "openai": self.openai_api_key,
+            "xai": self.xai_api_key,
+        }.get(provider)
         value = secret.get_secret_value().strip() if secret is not None else ""
         return value or None
 

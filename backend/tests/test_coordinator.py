@@ -305,6 +305,8 @@ async def test_live_check_command_with_fake_providers(fresh_database_url: str, t
             "OPENAI_API_KEY": "sk-openai-fake",
             "ANTHROPIC_BASE_URL": fake,
             "OPENAI_BASE_URL": f"{fake}/v1",
+            "XAI_API_KEY": "xai-fake",
+            "XAI_BASE_URL": f"{fake}/xai/v1",
             "LIVE_BUDGET_USD": "10.00",
         }
         with run_server(fresh_database_url, tmp_path, **env):  # seeds the Claude and GPT agents
@@ -321,5 +323,10 @@ async def test_live_check_command_with_fake_providers(fresh_database_url: str, t
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "[anthropic] OK  model=claude-haiku-5-5" in proc.stdout
         assert "[openai] OK  model=gpt-6-luna" in proc.stdout
+        assert "[xai] OK  model=grok-4.20-0309-non-reasoning" in proc.stdout
         assert "of $10.00 cap" in proc.stdout
-        assert (await fake_calls(fake))["models"] == ["claude-haiku-5-5", "gpt-6-luna"]
+        assert (await fake_calls(fake))["models"] == [
+            "claude-haiku-5-5",
+            "gpt-6-luna",
+            "grok-4.20-0309-non-reasoning",
+        ]
