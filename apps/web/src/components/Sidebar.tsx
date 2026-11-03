@@ -26,7 +26,7 @@ export function Sidebar({ open, principal, rooms, selectedId, onSelect, onCreate
       <aside
         id="left-sidebar"
         aria-label="Rooms"
-        className={`fixed inset-y-0 left-0 z-40 flex w-[min(var(--drawer-w),100vw)] shrink-0 flex-col border-r border-line bg-sidebar transition-transform md:w-[var(--sidebar-w)] md:static md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-[min(var(--drawer-w),100vw)] shrink-0 flex-col border-r border-line bg-sidebar md:w-[var(--sidebar-w)] md:static md:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full invisible md:visible"
         }`}
       >

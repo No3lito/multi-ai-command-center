@@ -42,6 +42,19 @@ describe("Composer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("reports disabled, sending, and delivery-error states without replacing outbox retry", () => {
+    const { container, rerender } = render(<Composer onSend={() => {}} disabled />);
+    expect(container.querySelector("form")).toHaveAttribute("data-state", "disabled");
+    expect(screen.getByTestId("composer-input")).toBeDisabled();
+    rerender(<Composer onSend={() => {}} sending />);
+    expect(container.querySelector("form")).toHaveAttribute("data-state", "sending");
+    expect(screen.getByRole("status")).toHaveTextContent("Sending…");
+    rerender(<Composer onSend={() => {}} deliveryError />);
+    expect(container.querySelector("form")).toHaveAttribute("data-state", "error");
+    expect(screen.getByRole("status")).toHaveTextContent("Use Retry or Discard");
+    expect(screen.getByText(/Message the team… \(Enter to send/)).toBeInTheDocument();
+  });
+
   it("has an accessible label", () => {
     render(<Composer onSend={() => {}} roomName="General" />);
     expect(screen.getByLabelText("Message #General")).toBe(screen.getByTestId("composer-input"));

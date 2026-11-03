@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Folded, Markdown, isLong } from "./Markdown";
 
 describe("Markdown", () => {
@@ -29,6 +29,29 @@ describe("Markdown", () => {
     const links = [...container.querySelectorAll("a")].map((a) => a.getAttribute("href"));
     expect(links).toEqual(["https://x.com"]);
     expect(screen.getByText("[image: pic]")).toBeInTheDocument();
+  });
+
+  it("copies only code text and keeps the code keyboard-scrollable", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    render(<Markdown text={"```ts\nconst value = 1;\n```"} />);
+    const code = screen.getByLabelText("Code block");
+    expect(code).toHaveAttribute("tabindex", "0");
+    expect(code).toHaveClass("overflow-x-auto");
+    await user.click(screen.getByRole("button", { name: "Copy code" }));
+    expect(writeText).toHaveBeenCalledWith("const value = 1;\n");
+    expect(screen.getByRole("status")).toHaveTextContent("Copied");
+    writeText.mockRestore();
+  });
+
+  it("reports clipboard failure without losing the code", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("Denied"));
+    render(<Markdown text={"```\nkeep me\n```"} />);
+    await user.click(screen.getByRole("button", { name: "Copy code" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Copy failed");
+    expect(screen.getByLabelText("Code block")).toHaveTextContent("keep me");
+    writeText.mockRestore();
   });
 
   it("folds long answers behind Show more", async () => {

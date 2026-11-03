@@ -65,6 +65,148 @@ body {
   white-space: nowrap;
 }
 
+/* Conversation-first layout; wide content scrolls locally, never on the page. */
+.participant-strip {
+  display: flex;
+  flex-shrink: 0;
+  gap: 24px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 13px;
+}
+
+.room-header h1 {
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
+.room-header h1 > span {
+  max-width: 100%;
+}
+
+[data-testid="message-list"] {
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+
+[data-testid="message-list"] > ol {
+  max-width: 960px;
+  margin-inline: auto;
+}
+
+.speaker-card {
+  min-width: 0;
+  max-width: min(100%, var(--chat-measure));
+  margin-block: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--speaker-color);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--speaker-color) 10%, var(--panel));
+  box-shadow: var(--card-shadow);
+  overflow-wrap: anywhere;
+}
+
+/* Rose remains an accent only, rather than a large pink surface. */
+.speaker-card[style*="--speaker-rose"] {
+  background: var(--panel);
+}
+
+.speaker-owner {
+  margin-left: auto;
+  width: fit-content;
+  max-width: 90%;
+}
+
+.speaker-continuation {
+  margin-top: -12px;
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  box-shadow: none;
+}
+
+.speaker-group-metadata > :first-child,
+.speaker-group-metadata > :nth-child(2) {
+  display: none;
+}
+
+.speaker-role {
+  display: inline-block;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.system-note {
+  display: flex;
+  gap: 8px;
+  margin-block: 8px;
+  padding: 8px;
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.system-action {
+  margin-block: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--warn);
+  border-radius: var(--radius-card);
+  background: var(--warn-soft);
+  box-shadow: var(--card-shadow);
+}
+
+.system-action[data-note-kind="error"] {
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.composer {
+  position: sticky;
+  bottom: 0;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  box-shadow: 0 -2px 8px rgb(15 23 42 / 0.04);
+}
+
+.composer[data-state="error"] {
+  border-top-color: var(--danger);
+}
+
+.code-block {
+  min-width: 0;
+  max-width: 100%;
+  margin-block: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+}
+
+.code-block pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.task-progress > summary {
+  cursor: pointer;
+  padding: 16px;
+  font-weight: 600;
+}
+
+@media (max-width: 767px) {
+  .speaker-card {
+    padding: 12px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation: none !important;

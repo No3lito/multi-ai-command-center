@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { formatCount, formatUsd } from "@/lib/format";
 import { foldRuns } from "@/lib/foldRuns";
 import { isRunActive, type Message, type PrincipalKind, type Run } from "@/lib/types";
 import type { PendingMessage } from "@/lib/useOutbox";
-import { senderStyle } from "@/lib/senderStyle";
+import { assignSpeakerStyles, senderStyle, speakerId, type SenderStyle, type Speaker } from "@/lib/senderStyle";
 import { Avatar } from "./Avatar";
 import { bottomLine } from "./DecisionsPanel";
 import { Folded, Markdown } from "./Markdown";
@@ -60,9 +60,14 @@ interface Props {
   /** When given, each finished workflow run is folded into one card (see foldRuns). */
   runs?: Run[];
   onArchive?: (runId: string) => Promise<unknown>;
+  participants?: readonly Speaker[];
 }
 
-export function MessageList({ messages, pending, loading, onRetry, onDiscard, runs, onArchive }: Props) {
+export function MessageList({ messages, pending, loading, onRetry, onDiscard, runs, onArchive, participants = [] }: Props) {
+  const [identities, setIdentities] = useState<ReadonlyMap<string, SenderStyle>>(() => new Map());
+  const senders = [...participants, ...messages.map((message) => message.sender)];
+  const styles = assignSpeakerStyles(senders, identities);
+  if (styles.size !== identities.size) setIdentities(styles);
   // Runs the owner watched in progress stay open after they finish; older ones start folded.
   const [seenActive, setSeenActive] = useState<ReadonlySet<string>>(() => new Set());
   const [openRuns, setOpenRuns] = useState<Record<string, boolean>>({});
@@ -75,10 +80,10 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard, ru
   const [announcement, setAnnouncement] = useState("");
   const seenCountRef = useRef<number | null>(null);
 
-  const scrollToBottom = useCallback((smooth: boolean) => {
+  const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    if (typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+    if (typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
     else el.scrollTop = el.scrollHeight;
     nearBottomRef.current = true;
     setShowJump(false);
@@ -98,7 +103,7 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard, ru
   // Auto-scroll when already near the bottom; otherwise offer "Jump to latest".
   useLayoutEffect(() => {
     if (total === 0) return;
-    if (nearBottomRef.current) scrollToBottom(false);
+    if (nearBottomRef.current) scrollToBottom();
     else setShowJump(true);
   }, [lastId, total, scrollToBottom]);
 
@@ -144,12 +149,13 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard, ru
               <MessageRow
                 key={item.message.id}
                 message={item.message}
+                style={styles.get(speakerId(item.message.sender))}
                 grouped={(() => {
                   const prev = items[i - 1];
                   return (
                     prev?.type === "message" &&
-                    prev.message.sender.kind === item.message.sender.kind &&
-                    prev.message.sender.display_name === item.message.sender.display_name
+                    prev.message.sender.kind !== "system" &&
+                    speakerId(prev.message.sender) === speakerId(item.message.sender)
                   );
                 })()}
               />
@@ -163,6 +169,7 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard, ru
                 open={openRuns[item.runId] ?? seenActive.has(item.runId)}
                 onToggle={(open) => setOpenRuns((prev) => ({ ...prev, [item.runId]: open }))}
                 onArchive={onArchive}
+                styles={styles}
               />
             ),
           )}
@@ -179,17 +186,24 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard, ru
       {showJump && (
         <button
           type="button"
-          onClick={() => scrollToBottom(true)}
+          onClick={() => scrollToBottom()}
           className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-line bg-panel px-3 py-1 text-xs font-medium shadow-md hover:bg-panel-2"
         >
-          Jump to latest
+          New messages ↓
         </button>
       )}
     </div>
   );
 }
 
-const SYSTEM_NOTE_KINDS = new Set<Message["kind"]>(["task.assign", "task.status", "task.result"]);
+/** Semantic kinds/data, not message prose, determine actionable notices. */
+function systemLabel(message: Message): string | null {
+  if (message.kind === "error") return "Error";
+  if (message.kind === "task.assign") return "Assignment";
+  if (/approv|decision|permission/.test(message.kind) ||
+      message.body.data?.requires_approval === true) return "Approval";
+  return null;
+}
 
 const FOLD_STATUS: Record<string, string> = {
   completed: "Completed",
@@ -212,6 +226,7 @@ function RunFold({
   open,
   onToggle,
   onArchive,
+  styles,
 }: {
   runId: string;
   run: Run | null;
@@ -220,6 +235,7 @@ function RunFold({
   open: boolean;
   onToggle: (open: boolean) => void;
   onArchive?: (runId: string) => Promise<unknown>;
+  styles: ReadonlyMap<string, SenderStyle>;
 }) {
   const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -287,8 +303,14 @@ function RunFold({
       {error && <p className="px-3 pb-2 text-xs text-danger">{error}</p>}
       {open && (
         <ol className="space-y-0.5 border-t border-line px-2 py-2">
-          {messages.map((m) => (
-            <MessageRow key={m.id} message={m} />
+          {messages.map((m, index) => (
+            <MessageRow
+              key={m.id}
+              message={m}
+              style={styles.get(speakerId(m.sender))}
+              grouped={m.sender.kind !== "system" && index > 0 &&
+                speakerId(messages[index - 1].sender) === speakerId(m.sender)}
+            />
           ))}
         </ol>
       )}
@@ -306,11 +328,13 @@ export function isSimulatedMessage(message: Message): boolean {
   return message.body.data?.simulated === true;
 }
 
-function MessageRow({ message, grouped = false }: { message: Message; grouped?: boolean }) {
-  if (message.sender.kind === "system" && (SYSTEM_NOTE_KINDS.has(message.kind) || message.kind === "error")) {
-    return <SystemNote message={message} />;
-  }
-  return <ChatRow message={message} grouped={grouped} />;
+function MessageRow({ message, grouped = false, style }: {
+  message: Message;
+  grouped?: boolean;
+  style?: SenderStyle;
+}) {
+  if (message.sender.kind === "system") return <SystemNote message={message} />;
+  return <ChatRow message={message} grouped={grouped} style={style ?? senderStyle(message.sender)} />;
 }
 
 export function SimulatedBadge() {
@@ -325,7 +349,7 @@ export function SimulatedBadge() {
   );
 }
 
-function ChatRow({ message, grouped }: { message: Message; grouped: boolean }) {
+function ChatRow({ message, grouped, style }: { message: Message; grouped: boolean; style: SenderStyle }) {
   const t = formatTime(message.created_at);
   const data = message.body.data;
   const isAgent = message.sender.kind === "agent";
@@ -334,8 +358,7 @@ function ChatRow({ message, grouped }: { message: Message; grouped: boolean }) {
   const simulated = isSimulatedMessage(message);
   const usage = isAgent ? message.usage : null;
   const tokens = usage ? (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) : 0;
-  const style = senderStyle(message.sender);
-  const mine = style.key === "owner";
+  const mine = message.sender.kind === "owner" || message.sender.kind === "human";
   return (
     <li
       data-testid="message-item"
@@ -347,15 +370,16 @@ function ChatRow({ message, grouped }: { message: Message; grouped: boolean }) {
       data-correlation-id={message.correlation_id ?? undefined}
       data-reply-to={message.reply_to ?? undefined}
       data-grouped={grouped || undefined}
-      className={`group flex gap-2 ${grouped ? "mt-[var(--space-1)]" : "mt-[var(--space-3)]"} ${
-        mine ? "flex-row-reverse" : ""
-      }`}
+      aria-label={`${message.sender.display_name}, ${mine ? "You" : "AI"}`}
+      style={{ "--speaker-color": style.color } as CSSProperties}
+      className={`group speaker-card ${grouped ? "speaker-continuation" : ""} ${mine ? "speaker-owner" : ""}`}
     >
-      <Avatar style={style} label={message.sender.display_name} />
-      <div
-        className={`min-w-0 rounded-lg px-3 py-2 ${mine ? "max-w-[85%] bg-panel-2" : "max-w-[var(--chat-measure)] flex-1"}`}
-      >
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <div className="min-w-0">
+        {!grouped && <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Avatar style={style} label={message.sender.display_name} />
+          <span className="speaker-role">{mine ? "You" : "AI"}</span>
+        </div>}
+        <div className={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 ${grouped ? "speaker-group-metadata" : ""}`}>
           <span className="inline-flex items-center gap-2 font-semibold text-fg">
             <span
               aria-hidden="true"
@@ -376,7 +400,7 @@ function ChatRow({ message, grouped }: { message: Message; grouped: boolean }) {
           <time dateTime={message.created_at} title={t.full} className="text-xs text-muted">
             {t.short}
           </time>
-          <span className="ml-auto font-mono text-[10px] text-muted opacity-0 group-hover:opacity-100">
+          <span className="ml-auto font-mono text-[10px] text-muted">
             #{message.seq}
           </span>
         </div>
@@ -398,6 +422,7 @@ function ChatRow({ message, grouped }: { message: Message; grouped: boolean }) {
 function SystemNote({ message }: { message: Message }) {
   const t = formatTime(message.created_at);
   const isError = message.kind === "error";
+  const label = systemLabel(message);
   return (
     <li
       data-testid="message-item"
@@ -406,8 +431,9 @@ function SystemNote({ message }: { message: Message }) {
       data-sender-kind="system"
       data-note-kind={message.kind}
       data-correlation-id={message.correlation_id ?? undefined}
-      className={`group my-1 flex gap-2 rounded-md px-2 py-1 text-xs ${
-        isError ? "bg-danger-soft text-danger" : "bg-panel-2/60 text-muted"
+      data-system-tier={label ? "action" : "routine"}
+      className={`group system-note ${label ? "system-action" : ""} ${
+        isError ? "bg-danger-soft text-danger" : "text-muted"
       }`}
     >
       <span aria-hidden="true" className="mt-px shrink-0">
@@ -416,8 +442,10 @@ function SystemNote({ message }: { message: Message }) {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className="font-semibold">{message.sender.display_name}</span>
-          <span className="font-mono text-[10px]">{message.kind}</span>
-          <time dateTime={message.created_at} title={t.full} className="text-[10px]">
+          <span className="speaker-role">System</span>
+          {label && <strong>{label}</strong>}
+          <span className="font-mono text-[13px]">{message.kind}</span>
+          <time dateTime={message.created_at} title={t.full} className="text-[13px]">
             {t.short}
           </time>
           <span className="ml-auto font-mono text-[10px] opacity-0 group-hover:opacity-100">#{message.seq}</span>

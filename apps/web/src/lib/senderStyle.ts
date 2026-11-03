@@ -1,4 +1,10 @@
-/** One visual identity per sender: color, initial and avatar shape (color is never the only cue). */
+/** Identity comes only from platform sender metadata, never message text. */
+export interface Speaker {
+  id?: string;
+  kind: string;
+  display_name: string;
+}
+
 export interface SenderStyle {
   key: "claude" | "gpt" | "grokbot" | "grok" | "coordinator" | "owner" | "other";
   color: string;
@@ -6,18 +12,11 @@ export interface SenderStyle {
   shape: "circle" | "diamond" | "square";
 }
 
-const STYLES: Record<SenderStyle["key"], Omit<SenderStyle, "key">> = {
-  claude: { color: "#E8955A", initial: "C", shape: "circle" },
-  gpt: { color: "#34C79A", initial: "G", shape: "circle" },
-  grokbot: { color: "#A78BFA", initial: "X", shape: "diamond" },
-  grok: { color: "#A78BFA", initial: "X", shape: "circle" },
-  coordinator: { color: "#8B95A5", initial: "⚙", shape: "square" },
-  owner: { color: "#4C9AFF", initial: "N", shape: "circle" },
-  other: { color: "#9AA4B2", initial: "?", shape: "square" },
-};
+export function speakerId(sender: Speaker): string {
+  return `${sender.kind}:${sender.id ?? sender.display_name}`;
+}
 
-/** Identity from trusted sender metadata (kind and display name), never from message text. */
-export function senderStyle(sender: { kind: string; display_name: string }): SenderStyle {
+export function senderStyle(sender: Speaker): SenderStyle {
   const name = sender.display_name.toLowerCase().replace(/[^a-z]/g, "");
   let key: SenderStyle["key"] = "other";
   if (sender.kind === "system") key = "coordinator";
@@ -26,16 +25,66 @@ export function senderStyle(sender: { kind: string; display_name: string }): Sen
   else if (name.startsWith("claude")) key = "claude";
   else if (name.startsWith("gpt") || name.startsWith("chatgpt")) key = "gpt";
   else if (name.startsWith("grok")) key = "grok";
-  const style = { key, ...STYLES[key] };
-  if (key === "owner" || key === "other") {
-    const first = sender.display_name.trim()[0];
-    if (first) style.initial = first.toUpperCase();
-  }
-  return style;
+  const colors = {
+    owner: "var(--speaker-owner)",
+    claude: "var(--speaker-claude)",
+    gpt: "var(--speaker-gpt)",
+    coordinator: "var(--speaker-system)",
+    grok: "var(--speaker-blue)",
+    grokbot: "var(--speaker-violet)",
+    other: "var(--speaker-green)",
+  };
+  return {
+    key,
+    color: colors[key],
+    initial: sender.display_name.trim().split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase() || "?",
+    shape: "circle",
+  };
 }
 
-/** Color with alpha for tinted bubbles, e.g. tint("#E8955A", 0.12). */
-export function tint(hex: string, alpha: number): string {
-  const n = parseInt(hex.slice(1), 16);
+const AVAILABLE = [
+  "var(--speaker-blue)",
+  "var(--speaker-violet)",
+  "var(--speaker-green)",
+  "var(--speaker-rose)",
+];
+
+/** Extend a room-local registry without changing identities already displayed. */
+export function assignSpeakerStyles(
+  senders: readonly Speaker[],
+  previous: ReadonlyMap<string, SenderStyle> = new Map(),
+): Map<string, SenderStyle> {
+  const result = new Map(previous);
+  const used = new Set([...result.values()].map((style) => style.color));
+  // Reserve fixed identities before allocating other participants.
+  const ordered = [...senders].sort((a, b) => {
+    const priority = (sender: Speaker) =>
+      ["owner", "claude", "gpt", "coordinator"].includes(senderStyle(sender).key) ? 0 : 1;
+    return priority(a) - priority(b);
+  });
+  for (const sender of ordered) {
+    const id = speakerId(sender);
+    if (result.has(id)) continue;
+    const style = senderStyle(sender);
+    const fixed = ["owner", "claude", "gpt", "coordinator"].includes(style.key);
+    let color = fixed && !used.has(style.color) ? style.color : AVAILABLE.find((value) => !used.has(value));
+    if (!color) {
+      let index = result.size;
+      do {
+        color = `hsl(${(index++ * 137.508) % 360} 55% 32%)`;
+      } while (used.has(color));
+    }
+    result.set(id, { ...style, color });
+    used.add(color);
+  }
+  return result;
+}
+
+/** Supports both legacy hex callers and CSS-variable speaker tokens. */
+export function tint(color: string, alpha: number): string {
+  if (!/^#[0-9a-f]{6}$/i.test(color)) {
+    return `color-mix(in srgb, ${color} ${alpha * 100}%, transparent)`;
+  }
+  const n = parseInt(color.slice(1), 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 }
