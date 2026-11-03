@@ -56,6 +56,11 @@ body {
   outline-offset: 2px;
 }
 
+/* The message box shows focus on its outer border, like the A1 look. */
+.composer textarea:focus-visible {
+  outline: none;
+}
+
 .sr-only-focusable:not(:focus):not(:focus-within) {
   position: absolute;
   width: 1px;

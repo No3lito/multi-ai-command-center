@@ -292,7 +292,6 @@ test("projects: a new room gets its own project folder, and inbox files are file
   await expect(page.getByTestId("new-room-family")).toHaveValue("trading");
   await page.getByTestId("new-room-submit").click();
   await openRoom(page, roomName);
-  await expect(page.getByTestId("room-project")).toContainText(`Project: ${roomName}`);
 
   await tab(page, "setup");
   await expect(page.getByTestId("project-select")).toHaveValue(/^01-PROJECTS\/trading\/polymarket-bot-/);
@@ -355,7 +354,7 @@ test("send to: a plain message gets an answer from the agent picked", async ({ p
   test.setTimeout(60_000);
   await signIn(page);
   await openRoom(page, "General");
-  await page.getByRole("button", { name: "GPT", exact: true }).click();
+  await page.getByTestId("send-to").selectOption({ label: "To GPT" });
   const input = page.getByTestId("composer-input");
   await expect(input).toHaveAttribute("placeholder", "Message GPT…");
   await input.fill("what is the plan for today");

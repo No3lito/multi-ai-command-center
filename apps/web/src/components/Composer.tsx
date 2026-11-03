@@ -188,45 +188,28 @@ export function Composer({
 
   const optionId = (i: number) => `${listId}-opt-${i}`;
 
+  const toOptions = [
+    ...agents.map((a) => ({ id: a.id as SendTo, label: a.display_name })),
+    ...(agents.length > 1 ? [{ id: "all" as SendTo, label: "Everyone" }] : []),
+    { id: "none" as SendTo, label: "No one (note)" },
+  ];
+  const status = disabled
+    ? "Messaging unavailable."
+    : deliveryError
+      ? "A message was not sent. Use Retry or Discard on the message above."
+      : sending
+        ? "Sending…"
+        : "";
+
   return (
     <form
       onSubmit={onSubmit}
       data-state={disabled ? "disabled" : deliveryError ? "error" : sending ? "sending" : "default"}
-      className="composer shrink-0 border-t border-line bg-panel px-3 py-4 sm:px-5"
+      className="composer shrink-0 px-3 pb-4 pt-2 sm:px-6 sm:pb-5"
     >
       <label htmlFor="composer-input" className="sr-only">
         {roomName ? `Message #${roomName}` : "Message"}
       </label>
-      {agents.length > 0 && (
-        <div
-          role="group"
-          aria-label="Send to"
-          data-testid="send-to"
-          className="mb-2 flex flex-wrap items-center gap-1.5"
-        >
-          <span className="mr-1 text-[13px] font-medium text-muted">Send to</span>
-          {[
-            ...agents.map((a) => ({ id: a.id as SendTo, label: a.display_name })),
-            ...(agents.length > 1 ? [{ id: "all" as SendTo, label: "Everyone" }] : []),
-            { id: "none" as SendTo, label: "No one (note)" },
-          ].map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              data-testid="send-to-option"
-              aria-pressed={sendTo === o.id}
-              onClick={() => chooseTo(o.id)}
-              className={`min-h-8 rounded-full border px-3 text-[13px] font-medium ${
-                sendTo === o.id
-                  ? "border-accent bg-accent-soft text-fg"
-                  : "border-line bg-transparent text-muted hover:text-fg"
-              }`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
       <div className="relative">
         {open && (
           <ul
@@ -258,7 +241,24 @@ export function Composer({
             ))}
           </ul>
         )}
-        <div className="flex items-end gap-2 rounded-lg border border-line bg-bg px-2 py-1.5 focus-within:border-accent">
+        <div className="flex items-end gap-2 rounded-xl border border-line bg-panel p-2.5 focus-within:border-accent focus-within:shadow-[0_0_0_1px_var(--accent)]">
+          {agents.length > 0 && (
+            <select
+              aria-label="Send to"
+              data-testid="send-to"
+              value={sendTo}
+              onChange={(e) => chooseTo(e.target.value)}
+              disabled={disabled}
+              title="Who answers"
+              className="h-10 max-w-[9rem] shrink-0 cursor-pointer rounded-lg bg-panel-2 px-2 text-[13px] font-medium text-muted hover:text-fg"
+            >
+              {toOptions.map((o) => (
+                <option key={o.id} value={o.id} data-testid="send-to-option">
+                  {o.id === "none" || o.id === "all" ? o.label : `To ${o.label}`}
+                </option>
+              ))}
+            </select>
+          )}
           <textarea
             ref={inputRef}
             id="composer-input"
@@ -283,28 +283,22 @@ export function Composer({
             aria-autocomplete="list"
             aria-controls={open ? listId : undefined}
             aria-activedescendant={open ? optionId(activeIndex) : undefined}
-            className="max-h-48 min-h-[1.75rem] min-w-0 flex-1 resize-none bg-transparent py-1 leading-snug placeholder:text-muted [field-sizing:content]"
+            className="max-h-48 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-1 py-[9px] leading-snug placeholder:text-muted focus-visible:outline-none [field-sizing:content]"
           />
           <button
             type="submit"
             data-testid="composer-send"
             disabled={!canSend}
-            className="rounded-md bg-accent px-3 py-1 text-sm font-medium text-accent-fg hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            className="h-10 shrink-0 rounded-lg bg-accent px-[18px] text-sm font-bold text-accent-fg hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Send
           </button>
         </div>
       </div>
-      <p role="status" aria-atomic="true" className="mt-2 text-[13px] text-muted">
-        {disabled
-          ? "Messaging unavailable."
-          : deliveryError
-            ? "A message was not sent. Use Retry or Discard on the message above."
-            : sending
-              ? "Sending…"
-              : ""}
+      <p role="status" aria-atomic="true" className={status ? "mt-2 text-[13px] text-muted" : "sr-only"}>
+        {status}
       </p>
-      <p id={hintId} className="mt-1 text-[13px] text-muted">
+      <p id={hintId} className={tooLong ? "mt-2 text-[13px]" : "sr-only"}>
         {tooLong ? (
           <span className="text-danger">
             Message is too long ({trimmed.length.toLocaleString()} of {MESSAGE_TEXT_MAX.toLocaleString()} characters).

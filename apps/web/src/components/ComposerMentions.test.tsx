@@ -59,7 +59,7 @@ describe("Composer mentions", () => {
 
   it("drops a mention whose @DisplayName was removed from the text, and matches case-insensitively", async () => {
     const { user, input, onSend } = setup();
-    await user.click(screen.getByRole("button", { name: "No one (note)" }));
+    await user.selectOptions(screen.getByTestId("send-to"), "none");
     await user.type(input, "@Cl");
     await user.keyboard("{Enter}");
     await user.clear(input);
@@ -81,7 +81,7 @@ describe("Send to", () => {
   it("sends to Claude by default, so a plain message gets an answer", async () => {
     window.localStorage.clear();
     const { user, input, onSend } = setup();
-    expect(screen.getByRole("button", { name: "Claude" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("send-to")).toHaveValue(CLAUDE_ID);
     await user.type(input, "what do you think?{Enter}");
     expect(onSend).toHaveBeenCalledWith("what do you think?", [CLAUDE_ID]);
   });
@@ -89,14 +89,14 @@ describe("Send to", () => {
   it("sends to the agent picked, to everyone, or to no one, and remembers the choice", async () => {
     window.localStorage.clear();
     const { user, input, onSend } = setup();
-    await user.click(screen.getByRole("button", { name: "GPT" }));
+    await user.selectOptions(screen.getByTestId("send-to"), GPT_ID);
     expect(input).toHaveAttribute("placeholder", "Message GPT…");
     await user.type(input, "one{Enter}");
     expect(onSend).toHaveBeenLastCalledWith("one", [GPT_ID]);
-    await user.click(screen.getByRole("button", { name: "Everyone" }));
+    await user.selectOptions(screen.getByTestId("send-to"), "all");
     await user.type(input, "two{Enter}");
     expect(onSend).toHaveBeenLastCalledWith("two", [CLAUDE_ID, GPT_ID]);
-    await user.click(screen.getByRole("button", { name: "No one (note)" }));
+    await user.selectOptions(screen.getByTestId("send-to"), "none");
     expect(screen.getByText(/Nobody replies to a note\./)).toBeInTheDocument();
     await user.type(input, "three{Enter}");
     expect(onSend).toHaveBeenLastCalledWith("three", []);
