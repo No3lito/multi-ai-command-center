@@ -1,8 +1,9 @@
 "use client";
 
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { isApiError } from "@/lib/api";
 import {
+  type FileSuggestions,
   RUN_BUDGET_DEFAULT,
   RUN_BUDGET_MAX,
   RUN_MAX_TURNS_DEFAULT,
@@ -69,9 +70,31 @@ interface Props {
   /** Lists the owner's shared folder; omit to hide file attachments. */
   listFiles?: (path?: string, signal?: AbortSignal) => Promise<FilesListing>;
   onStarted: (run: Run) => void;
+  /** Title of the room's workspace project, when it has one. */
+  projectTitle?: string | null;
+  /** Project rooms: files matching the goal, pre-selected as the owner types. */
+  suggestFiles?: (goal: string, signal?: AbortSignal) => Promise<FileSuggestions>;
+  /** Wait this long after typing before suggesting (ms). */
+  suggestDelayMs?: number;
+  /** The room's project folder: the file browser opens there. */
+  projectPath?: string | null;
+  /** A workspace exists but this room has no project: say how to link one. */
+  noProjectHint?: boolean;
 }
 
-export function CollabForm({ roomId, roomAgents, externals = [], createRun, listFiles, onStarted }: Props) {
+export function CollabForm({
+  roomId,
+  roomAgents,
+  externals = [],
+  createRun,
+  listFiles,
+  onStarted,
+  projectTitle = null,
+  suggestFiles,
+  suggestDelayMs = 600,
+  projectPath = null,
+  noProjectHint = false,
+}: Props) {
   const usable = roomAgents.filter((r) => r.agent && isAgentUsable(r.agent));
   const [goal, setGoal] = useState("");
   const [workflowSel, setWorkflowSel] = useState<RunWorkflow | null>(null);
@@ -83,7 +106,47 @@ export function CollabForm({ roomId, roomAgents, externals = [], createRun, list
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [attached, setAttached] = useState<PickedFile[]>([]);
+  const [always, setAlways] = useState<string[]>([]);
+  // Suggestions the owner removed stay removed while the goal is edited.
+  const dismissed = useRef<Set<string>>(new Set());
+  const suggestRef = useRef(suggestFiles);
+  useEffect(() => {
+    suggestRef.current = suggestFiles;
+  });
+  const hasSuggest = !!suggestFiles;
+  useEffect(() => {
+    if (!hasSuggest) return;
+    const text = goal.trim();
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      if (text.length < 6 || !suggestRef.current) return;
+      suggestRef
+        .current(text, abort.signal)
+        .then((r) => {
+          setAlways(r.always);
+          setAttached((prev) => {
+            const manual = prev.filter((p) => !p.suggested);
+            const picks = r.suggested
+              .filter((f) => !dismissed.current.has(f.path) && !manual.some((m) => m.path === f.path))
+              .map((f) => ({ path: f.path, size: f.size ?? 0, suggested: f.matched }));
+            return [...manual, ...picks].slice(0, 10);
+          });
+        })
+        .catch(() => {
+          // Suggestions are a convenience; the owner can still pick files by hand.
+        });
+    }, suggestDelayMs);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [goal, hasSuggest, suggestDelayMs]);
+  const changeAttached = (next: PickedFile[]) => {
+    for (const f of attached) if (f.suggested && !next.some((n) => n.path === f.path)) dismissed.current.add(f.path);
+    setAttached(next);
+  };
   const [writeBrief, setWriteBrief] = useState(true);
+  const [agentFiles, setAgentFiles] = useState(true);
   const ids = {
     goal: useId(),
     workflow: useId(),
@@ -142,10 +205,12 @@ export function CollabForm({ roomId, roomAgents, externals = [], createRun, list
         max_turns: RUN_MAX_TURNS_DEFAULT,
         ...(attached.length > 0 ? { attachments: attached.map((f) => f.path) } : {}),
         ...(writeBrief ? {} : { brief: false }),
+        ...(projectTitle && !agentFiles ? { agent_files: false } : {}),
       };
       const run = await createRun(roomId, withWorker ? { ...body, workflow, builder_id: builderId } : body);
       setGoal("");
       setAttached([]);
+      dismissed.current = new Set();
       onStarted(run);
     } catch (err) {
       setServerError(isApiError(err) ? err.message : "Could not start the run.");
@@ -255,7 +320,39 @@ export function CollabForm({ roomId, roomAgents, externals = [], createRun, list
             {errors.builderId && <ErrorText>{errors.builderId}</ErrorText>}
           </>
         )}
-        {listFiles && <AttachmentsPicker listFiles={listFiles} selected={attached} onChange={setAttached} />}
+        {projectTitle && (
+          <label className="flex items-start gap-2 text-[11px] text-muted" data-testid="collab-agent-files-box">
+            <input
+              type="checkbox"
+              data-testid="collab-agent-files"
+              checked={agentFiles}
+              onChange={(e) => setAgentFiles(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Let the lead agent pick what to read from <strong className="text-fg">{projectTitle}</strong> (its card
+              and rules are always included)
+            </span>
+          </label>
+        )}
+        {noProjectHint && (
+          <p className="text-[11px] text-warn" data-testid="collab-no-project">
+            This room has no project folder, so no files are suggested. Link one under Setup → Project folder.
+          </p>
+        )}
+        {always.length > 0 && (
+          <p className="text-[11px] text-muted" data-testid="collab-always">
+            Always included: {always.map((p) => p.split("/").pop()).join(", ")}
+          </p>
+        )}
+        {listFiles && (
+          <AttachmentsPicker
+            listFiles={listFiles}
+            selected={attached}
+            onChange={changeAttached}
+            startPath={projectPath ?? ""}
+          />
+        )}
         <label className="flex items-center gap-2 text-[11px] text-muted">
           <input
             type="checkbox"

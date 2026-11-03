@@ -1,5 +1,6 @@
 """Milestone B routes and seeding: agents, room membership, runs, usage, mention routing."""
 
+import re
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Annotated, Any
@@ -9,11 +10,12 @@ from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from command_center import decisions as decisions_mod
-from command_center import files
+from command_center import files, project_files
 from command_center.config import Settings
 from command_center.db import models
 from command_center.db.session import Database
 from command_center.external import issue_token, revoke_tokens
+from command_center.files import FileAccessError
 from command_center.ids import new_id
 from command_center.messaging import service
 from command_center.orchestrator.engine import create_reply_runs, room_agents, room_externals
@@ -30,18 +32,27 @@ from command_center.protocol import (
     DecisionOut,
     FileEntryOut,
     FilesOut,
+    FileSuggestionsOut,
     FollowUpPlanOut,
     HistoryOut,
+    InboxFileIn,
+    InboxItemOut,
     MemberIn,
+    NewProjectIn,
     PriceOut,
+    ProjectOut,
     RoomDetailOut,
+    RoomProjectIn,
     RunCreateIn,
     RunOut,
+    SuggestedFileOut,
     UsageOut,
     UsageRow,
+    WorkspaceOut,
 )
 from command_center.providers.model_port import LIVE_SCOPE, agent_status
 from command_center.providers.prices import price_for
+from command_center.workspace import Project, Workspace, is_project_workspace, open_workspace
 
 DEFAULT_REPLY_BUDGET = Decimal("0.25")  # per reply run
 REPLY_TREE_BUDGET = Decimal("0.50")  # shared by every run triggered from one human message
@@ -144,6 +155,7 @@ def run_out(r: models.Run, attachments: list[AttachmentOut] | None = None) -> Ru
         brief=r.brief,
         pending_decisions=r.pending_decisions,
         archived_at=r.archived_at,
+        agent_files=r.agent_files if r.agent_files is not None else True,
         id=r.id,
         room_id=r.room_id,
         kind=r.kind,
@@ -166,6 +178,18 @@ def run_out(r: models.Run, attachments: list[AttachmentOut] | None = None) -> Ru
         updated_at=r.updated_at,
         finished_at=r.finished_at,
     )
+
+
+def suggest_project(filename: str, projects: list[Project]) -> str | None:
+    """A free, keyword-based guess at which project an inbox file belongs to (no AI call)."""
+    words = {w for w in re.split(r"[^a-z0-9]+", filename.lower()) if len(w) >= 3}
+    best, score = None, 0
+    for p in projects:
+        keys = {w for w in re.split(r"[^a-z0-9]+", f"{p.slug} {p.title} {p.family}".lower()) if len(w) >= 3}
+        hits = len(words & keys)
+        if hits > score:
+            best, score = p.path, hits
+    return best
 
 
 def _plan(raw: Any) -> FollowUpPlanOut:
@@ -331,6 +355,7 @@ def register(
             created_at=room.created_at,
             member_count=len(members),
             last_seq=room.last_seq,
+            project_path=room.project_path,
             members=members,
         )
 
@@ -340,7 +365,11 @@ def register(
     async def create_run(
         room_id: str, body: RunCreateIn, request: Request, principal: PrincipalDep, session: SessionDep
     ) -> RunOut:
-        await member_room(session, room_id, principal)
+        room = await member_room(session, room_id, principal)
+        # Project rooms start with a "select" step: project card attached, lead agent picks files.
+        project_room = bool(room.project_path) and is_project_workspace(
+            open_workspace(settings.files_root, settings.sources_root)
+        )
         build = body.workflow == "build"
         review = body.workflow == "review"
         roles = [("planner", body.planner_id), ("critic", body.critic_id)]
@@ -368,17 +397,16 @@ def register(
         snapshots: list[files.Snapshot] = []
         wanted = list(dict.fromkeys(body.attachments))
         if wanted:
-            root = settings.files_root
-            if not files.available(root):
+            ws = open_workspace(settings.files_root, settings.sources_root)
+            if ws is None:
                 raise api_error(422, "validation_error", "attachments: no shared folder is configured")
-            assert root is not None
             if len(wanted) > settings.attachment_max_files:
                 raise api_error(
                     422, "validation_error", f"attachments: at most {settings.attachment_max_files} files"
                 )
             for rel in wanted:
                 try:
-                    snapshots.append(files.read_snapshot(root, rel))
+                    snapshots.append(ws.read_snapshot(rel))
                 except (files.FileAccessError, OSError) as exc:
                     raise api_error(422, "validation_error", f"attachments: {exc}") from exc
             total = sum(s.chars for s in snapshots)
@@ -396,14 +424,22 @@ def register(
             room_id=room_id,
             kind=body.workflow,
             status="queued",
-            step={"build": "design", "review": "share"}.get(body.workflow, "plan"),
+            step="select"
+            if project_room
+            else {"build": "design", "review": "share"}.get(body.workflow, "plan"),
             goal=body.goal.strip(),
             planner_id=body.planner_id,
             critic_id=body.critic_id,
             builder_id=body.builder_id,
             # Agent turns needed: build 7, review 5, plan & review 3, plus one for the brief.
-            max_turns=max(body.max_turns, (7 if build else 5 if review else 3) + (1 if body.brief else 0)),
+            max_turns=max(
+                body.max_turns,
+                (7 if build else 5 if review else 3)
+                + (1 if body.brief else 0)
+                + (1 if project_room and body.agent_files else 0),
+            ),
             write_brief=body.brief,
+            agent_files=body.agent_files,
             budget_usd=Decimal(str(body.budget_usd)),
             spent_usd=Decimal(0),
             simulated=settings.provider_mode == "simulated",
@@ -472,8 +508,8 @@ def register(
     async def list_files(principal: PrincipalDep, path: str = "") -> FilesOut:
         """Browse the shared folder (owner only) to pick files to attach to a run."""
         require_owner(principal)
-        root = settings.files_root
-        if not files.available(root):
+        ws = open_workspace(settings.files_root, settings.sources_root)
+        if ws is None:
             return FilesOut(
                 enabled=False,
                 path="",
@@ -481,9 +517,8 @@ def register(
                 max_files=settings.attachment_max_files,
                 max_chars=settings.attachment_max_chars,
             )
-        assert root is not None
         try:
-            entries = files.list_dir(root, path)
+            entries = ws.list_dir(path)
         except files.FileAccessError as exc:
             raise api_error(422, "validation_error", str(exc)) from exc
         return FilesOut(
@@ -539,6 +574,116 @@ def register(
         if cancelled:
             await audit(session, "run.cancel", principal.id, run.id, request, cancelled=cancelled)
         return run_out(run)
+
+    # ------------------------------------------------------------ workspace and projects
+
+    def project_out(p: Project) -> ProjectOut:
+        return ProjectOut(
+            path=p.path, family=p.family, slug=p.slug, title=p.title, status=p.status, goal=p.goal
+        )
+
+    def owner_workspace() -> Workspace:
+        ws = open_workspace(settings.files_root, settings.sources_root)
+        if not is_project_workspace(ws):
+            raise api_error(422, "validation_error", "No project workspace is configured")
+        assert ws is not None
+        return ws
+
+    @app.get("/api/workspace", response_model=WorkspaceOut)
+    async def get_workspace(principal: PrincipalDep) -> WorkspaceOut:
+        """Projects, families and inbox of the owner's workspace (owner only)."""
+        require_owner(principal)
+        ws = open_workspace(settings.files_root, settings.sources_root)
+        if ws is None:
+            return WorkspaceOut(enabled=False, structured=False, families=[], projects=[], inbox=[])
+        if not is_project_workspace(ws):
+            return WorkspaceOut(enabled=True, structured=False, families=[], projects=[], inbox=[])
+        projects = ws.projects()
+        return WorkspaceOut(
+            enabled=True,
+            structured=True,
+            families=ws.families(),
+            projects=[project_out(p) for p in projects],
+            inbox=[
+                InboxItemOut(name=e.name, size=e.size, suggested_project=suggest_project(e.name, projects))
+                for e in ws.inbox()
+            ],
+        )
+
+    @app.post("/api/workspace/projects", response_model=ProjectOut, status_code=201)
+    async def create_project(
+        body: NewProjectIn, request: Request, principal: PrincipalDep, session: SessionDep
+    ) -> ProjectOut:
+        require_owner(principal)
+        ws = owner_workspace()
+        try:
+            project = ws.create_project(body.family, body.name, body.goal)
+        except (FileAccessError, OSError) as exc:
+            raise api_error(422, "validation_error", f"project: {exc}") from exc
+        await audit(session, "project.create", principal.id, project.path, request)
+        return project_out(project)
+
+    @app.get("/api/rooms/{room_id}/suggest-files", response_model=FileSuggestionsOut)
+    async def suggest_files(
+        room_id: str,
+        principal: PrincipalDep,
+        session: SessionDep,
+        goal: Annotated[str, Query(max_length=4000)] = "",
+    ) -> FileSuggestionsOut:
+        """Files in the room's project that match the goal's words (free keyword match, no AI)."""
+        require_owner(principal)
+        room = await member_room(session, room_id, principal)
+        ws = open_workspace(settings.files_root, settings.sources_root)
+        project = ws.project(room.project_path) if ws is not None and room.project_path else None
+        if ws is None or project is None:
+            return FileSuggestionsOut(project_path=None, always=[], suggested=[])
+        hits = ws.suggest(project.path, goal)
+        return FileSuggestionsOut(
+            project_path=project.path,
+            always=project_files.context_paths(ws, project),
+            suggested=[SuggestedFileOut(path=e.path, size=e.size, matched=m) for e, _, m in hits],
+        )
+
+    @app.put("/api/rooms/{room_id}/project", response_model=RoomDetailOut)
+    async def set_room_project(
+        room_id: str, body: RoomProjectIn, request: Request, principal: PrincipalDep, session: SessionDep
+    ) -> RoomDetailOut:
+        """Link a room to a workspace project, or unlink it (project_path null)."""
+        require_owner(principal)
+        room = await member_room(session, room_id, principal)
+        path: str | None = None
+        if body.project_path:
+            found = owner_workspace().project(body.project_path)
+            if found is None:
+                raise api_error(422, "validation_error", "project_path: not a project in the workspace")
+            path = found.path
+        room.project_path = path
+        await session.commit()
+        await audit(session, "room.project", principal.id, room.id, request, project=path)
+        members = await service.room_members(session, room.id)
+        return RoomDetailOut(
+            id=room.id,
+            name=room.name,
+            created_at=room.created_at,
+            member_count=len(members),
+            last_seq=room.last_seq,
+            project_path=room.project_path,
+            members=members,
+        )
+
+    @app.post("/api/workspace/inbox/file", response_model=FileEntryOut)
+    async def file_inbox_item(
+        body: InboxFileIn, request: Request, principal: PrincipalDep, session: SessionDep
+    ) -> FileEntryOut:
+        """Move one inbox file into a project's notes/ folder. The owner's click is the approval."""
+        require_owner(principal)
+        ws = owner_workspace()
+        try:
+            path = ws.file_from_inbox(body.name, body.project_path)
+        except (FileAccessError, OSError) as exc:
+            raise api_error(422, "validation_error", str(exc)) from exc
+        await audit(session, "inbox.file", principal.id, path, request, name=body.name)
+        return FileEntryOut(name=path.rsplit("/", 1)[-1], path=path, type="file", size=None, readable=True)
 
     # ------------------------------------------------------------ decisions
 
@@ -611,6 +756,22 @@ def register(
         source_goal = (
             await session.scalar(select(models.Run.goal).where(models.Run.id == decision.run_id)) or ""
         )
+        room = await session.get(models.Room, decision.room_id)
+        ws = open_workspace(settings.files_root, settings.sources_root)
+        if room is not None and room.project_path and ws is not None and ws.project(room.project_path):
+            try:
+                project_files.save_decision(
+                    ws,
+                    room.project_path,
+                    question=decision.question,
+                    answer=ANSWER_STATUS[body.answer],
+                    note=note,
+                    recommendation=decision.recommendation,
+                    follow_up_run_id=decision.follow_up_run_id,
+                    run_id=decision.run_id,
+                )
+            except (FileAccessError, OSError):
+                pass  # saving the record is best effort; the answer itself is stored
 
         # Tell the room, so every agent (Grok Bot included, via read_messages) sees the answer.
         coordinator = await session.scalar(

@@ -265,3 +265,28 @@ test("connect Grok Bot from the dashboard; a review run waits for it", async ({ 
   await item.getByTestId("connection-revoke-confirm").click();
   await expect(item).toHaveAttribute("data-status", "disabled");
 });
+
+test("projects: a new room gets its own project folder, and inbox files are filed with one click", async ({ page }) => {
+  await signIn(page);
+  const roomName = `Polymarket bot ${Date.now()}`;
+  await page.getByTestId("new-room-name").fill(roomName);
+  await expect(page.getByTestId("new-room-project")).toHaveValue("__new__");
+  await expect(page.getByTestId("new-room-family")).toHaveValue("trading");
+  await page.getByTestId("new-room-submit").click();
+  await openRoom(page, roomName);
+  await expect(page.getByTestId("room-project")).toContainText(`Project: ${roomName}`);
+
+  await tab(page, "setup");
+  await expect(page.getByTestId("project-select")).toHaveValue(/^01-PROJECTS\/trading\/polymarket-bot-/);
+  await expect(page.getByTestId("project-panel")).toContainText("save briefs, decisions and outputs into");
+
+  await openGoal(page);
+  await expect(page.getByTestId("collab-agent-files")).toBeChecked();
+  await page.getByTestId("modal-close").click();
+
+  await tab(page, "decide");
+  const item = page.getByTestId("inbox-item").filter({ hasText: "demo-notes.md" });
+  await expect(item.getByTestId("inbox-project")).toHaveValue("01-PROJECTS/trading/demo-strategy");
+  await item.getByTestId("inbox-file").click();
+  await expect(page.getByTestId("inbox-panel")).toHaveCount(0);
+});

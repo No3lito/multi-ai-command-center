@@ -5,7 +5,10 @@ import type {
   Decision,
   DecisionAnswerBody,
   DecisionAnswerResult,
+  FileSuggestions,
   HistoryResult,
+  NewProject,
+  WorkspaceInfo,
   Message,
   MessagePage,
   PostMessageBody,
@@ -150,7 +153,23 @@ export const api = {
   health: () => request<{ status: string; database: string }>("/api/health"),
 
   listRooms: () => request<Room[]>("/api/rooms"),
-  createRoom: (name: string) => request<Room>("/api/rooms", { method: "POST", body: { name } }),
+  createRoom: (name: string, project?: { project_path?: string; new_project?: NewProject }) =>
+    request<Room>("/api/rooms", { method: "POST", body: { name, ...(project ?? {}) } }),
+  setRoomProject: (roomId: string, projectPath: string | null) =>
+    request<RoomDetail>(`/api/rooms/${enc(roomId)}/project`, {
+      method: "PUT",
+      body: { project_path: projectPath },
+    }),
+  suggestFiles: (roomId: string, goal: string, signal?: AbortSignal) =>
+    request<FileSuggestions>(`/api/rooms/${enc(roomId)}/suggest-files?goal=${encodeURIComponent(goal)}`, {
+      signal,
+    }),
+  getWorkspace: (signal?: AbortSignal) => request<WorkspaceInfo>("/api/workspace", { signal }),
+  fileInboxItem: (name: string, projectPath: string) =>
+    request<{ path: string }>("/api/workspace/inbox/file", {
+      method: "POST",
+      body: { name, project_path: projectPath },
+    }),
   getRoom: (roomId: string, signal?: AbortSignal) => request<RoomDetail>(`/api/rooms/${enc(roomId)}`, { signal }),
 
   listMessages: (roomId: string, afterSeq: number, limit = 200, signal?: AbortSignal) =>

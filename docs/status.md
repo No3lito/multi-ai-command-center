@@ -2,6 +2,26 @@
 
 Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
 
+## Project workspace (in review, branch `agent/claude/workspace-projects`, stacked on PR #9)
+
+The owner's work now lives in one workspace folder, which is also an Obsidian vault. The folders are organized as families and projects, and the owner's live folders are linked in read-only. Rooms are linked to projects. In a project room:
+
+- the lead agent picks the project files to read;
+- briefs, outputs and decisions are saved back into the project automatically;
+- a new room creates its own project folder;
+- inbox files are filed with one click;
+- Grok Bot can read the project and save to `outputs`.
+
+Contract: [`docs/api/workspace.md`](api/workspace.md), migration 0012.
+
+Evidence:
+
+- Backend: 155 passed. That includes `test_workspace.py`: path safety through linked folders, unconnected links, never overwriting, inbox filing, INDEX regeneration that keeps the owner's text, and a full project run with fake providers (picks, attachments, saved brief, output and decision). It also covers Grok Bot's MCP tools. The migration round trip and `alembic check` are clean.
+- Dashboard: 124 passed.
+- Playwright: 6 passed. The new browser test creates a room with its own project and files an inbox item.
+
+**Not yet verified with real models or on the owner's PC** (Docker mounts of Windows junction targets).
+
 ## Self-serve dashboard (in review, branch `agent/claude/self-serve`)
 
 The owner asked for the Command Center to work without a go-between. So:

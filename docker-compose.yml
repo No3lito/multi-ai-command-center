@@ -46,13 +46,17 @@ services:
       # pointed at port 8001, never the dashboard on 8000.
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8001
-      # Files you can attach to runs: FILES_FOLDER on this computer, mounted read-only.
+      # The owner's workspace (FILES_FOLDER on this computer). The Command Center writes only to
+      # each project's briefs, decisions, outputs and notes folders and the project table in
+      # INDEX.md. Linked project sources are mounted read-only under /sources by
+      # docker-compose.override.yml, written by infrastructure/workspace-mounts.ps1.
       FILES_ROOT: /shared
+      SOURCES_ROOT: /sources
     ports:
       - "127.0.0.1:8000:8000"
       - "127.0.0.1:8001:8001"
     volumes:
-      - ${FILES_FOLDER:-./shared-files}:/shared:ro
+      - ${FILES_FOLDER:-./shared-files}:/shared
     read_only: true
     tmpfs:
       - /tmp

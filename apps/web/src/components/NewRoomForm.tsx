@@ -3,6 +3,11 @@
 import { useId, useState, type FormEvent } from "react";
 import { api, isApiError } from "@/lib/api";
 import { ROOM_NAME_MAX, type Room } from "@/lib/types";
+import { familyLabel, useWorkspace } from "@/lib/useWorkspace";
+
+const NONE = "";
+const NEW = "__new__";
+const NEW_FAMILY = "__new_family__";
 
 export function validateRoomName(raw: string): string | null {
   const name = raw.trim();
@@ -15,6 +20,10 @@ export function NewRoomForm({ onCreated }: { onCreated: (room: Room) => void }) 
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const { workspace, reload } = useWorkspace();
+  const [project, setProject] = useState<string>(NEW);
+  const [family, setFamily] = useState<string>("");
+  const [newFamily, setNewFamily] = useState("");
   const inputId = useId();
   const errorId = useId();
 
@@ -28,8 +37,21 @@ export function NewRoomForm({ onCreated }: { onCreated: (room: Room) => void }) 
     setBusy(true);
     setError(null);
     try {
-      const room = await api.createRoom(name.trim());
+      const famChoice = family || workspace.families[0] || NEW_FAMILY;
+      const fam = famChoice === NEW_FAMILY ? newFamily.trim() : famChoice;
+      if (workspace.structured && project === NEW && !fam) {
+        setError("Enter a family name for the new project.");
+        return;
+      }
+      const room = !workspace.structured
+        ? await api.createRoom(name.trim())
+        : project === NEW
+          ? await api.createRoom(name.trim(), { new_project: { family: fam, name: name.trim() } })
+          : project
+            ? await api.createRoom(name.trim(), { project_path: project })
+            : await api.createRoom(name.trim());
       setName("");
+      if (project === NEW) reload();
       onCreated(room);
     } catch (err) {
       if (isApiError(err) && err.code === "room_exists") setError("A room with that name already exists.");
@@ -68,6 +90,61 @@ export function NewRoomForm({ onCreated }: { onCreated: (room: Room) => void }) 
           {busy ? "Adding" : "Add"}
         </button>
       </div>
+      {workspace.structured && name.trim() && (
+        <div className="mt-1.5 space-y-1 px-1 text-[11px]" data-testid="new-room-project-box">
+          <label className="block text-muted">
+            Project folder
+            <select
+              data-testid="new-room-project"
+              value={project}
+              onChange={(e) => setProject(e.target.value)}
+              className="mt-0.5 block w-full rounded border border-line bg-bg px-1 py-1 text-xs text-fg"
+            >
+              <option value={NEW}>New project: {name.trim()}</option>
+              {workspace.families.map((f) => (
+                <optgroup key={f} label={familyLabel(f)}>
+                  {workspace.projects
+                    .filter((p) => p.family === f)
+                    .map((p) => (
+                      <option key={p.path} value={p.path}>
+                        {p.title}
+                      </option>
+                    ))}
+                </optgroup>
+              ))}
+              <option value={NONE}>No project folder</option>
+            </select>
+          </label>
+          {project === NEW && (
+            <label className="block text-muted">
+              Family
+              <select
+                data-testid="new-room-family"
+                value={family || workspace.families[0] || NEW_FAMILY}
+                onChange={(e) => setFamily(e.target.value)}
+                className="mt-0.5 block w-full rounded border border-line bg-bg px-1 py-1 text-xs text-fg"
+              >
+                {workspace.families.map((f) => (
+                  <option key={f} value={f}>
+                    {familyLabel(f)}
+                  </option>
+                ))}
+                <option value={NEW_FAMILY}>New family…</option>
+              </select>
+              {(family || workspace.families[0] || NEW_FAMILY) === NEW_FAMILY && (
+                <input
+                  data-testid="new-room-new-family"
+                  value={newFamily}
+                  maxLength={60}
+                  placeholder="Family name, e.g. Fantasy sports"
+                  onChange={(e) => setNewFamily(e.target.value)}
+                  className="mt-1 block w-full rounded border border-line bg-bg px-1 py-1 text-xs text-fg"
+                />
+              )}
+            </label>
+          )}
+        </div>
+      )}
       {error && (
         <p id={errorId} role="alert" className="mt-1 px-1 text-xs text-danger">
           {error}

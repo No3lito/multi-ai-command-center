@@ -24,6 +24,7 @@ from command_center import files
 from command_center.config import Settings
 from command_center.db import models
 from command_center.ids import new_id
+from command_center.workspace import is_project_workspace, open_workspace
 
 MAX_DECISIONS = 10
 DEFAULT_FOLLOW_UP_BUDGET = Decimal("0.50")
@@ -215,13 +216,12 @@ async def start_follow_up(
             ).all()
         )
     snapshots: list[files.Snapshot] = []
-    root = settings.files_root
-    if wanted and files.available(root):
-        assert root is not None
+    ws = open_workspace(settings.files_root, settings.sources_root)
+    if wanted and ws is not None:
         total = 0
         for rel in wanted[: settings.attachment_max_files]:
             try:
-                snap = files.read_snapshot(root, rel)
+                snap = ws.read_snapshot(rel)
             except (files.FileAccessError, OSError):
                 continue  # a file that moved or vanished is skipped, not fatal
             if total + snap.chars > settings.attachment_max_chars:
@@ -230,14 +230,17 @@ async def start_follow_up(
             snapshots.append(snap)
 
     run_id = new_id("run")
-    turns = {"build": 8, "review": 6}.get(workflow, 4)
+    room = await session.get(models.Room, decision.room_id)
+    turns = {"build": 8, "review": 6}.get(workflow, 4) + 1  # +1 for picking project files
     run = models.Run(
         id=run_id,
         root_run_id=run_id,
         room_id=decision.room_id,
         kind=workflow,
         status="queued",
-        step={"build": "design", "review": "share"}.get(workflow, "plan"),
+        step="select"
+        if room is not None and room.project_path and is_project_workspace(ws)
+        else {"build": "design", "review": "share"}.get(workflow, "plan"),
         goal=goal,
         planner_id=source.planner_id,
         critic_id=source.critic_id,

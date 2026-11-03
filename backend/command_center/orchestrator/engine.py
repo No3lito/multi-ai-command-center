@@ -19,13 +19,15 @@ from typing import Protocol
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from command_center import decisions
+from command_center import decisions, project_files
 from command_center.db import models
+from command_center.files import FileAccessError
 from command_center.ids import new_id
 from command_center.messaging import service
 from command_center.orchestrator.context import build_request
 from command_center.providers.base import ProviderError
 from command_center.providers.model_port import BudgetExceeded, ModelPort, ProviderNotReady
+from command_center.workspace import Workspace
 
 log = logging.getLogger(__name__)
 
@@ -294,8 +296,15 @@ class BuiltinEngine:
         reply_budget_usd: Decimal,
         simulated: bool,
         max_runs_per_tree: int = DEFAULT_MAX_RUNS_PER_TREE,
+        workspace: Callable[[], Workspace | None] | None = None,
+        attachment_max_files: int = 10,
+        attachment_max_chars: int = 300_000,
     ) -> None:
         self.max_runs_per_tree = max_runs_per_tree
+        # The owner's project workspace (None when no folder is configured).
+        self.workspace = workspace or (lambda: None)
+        self.attachment_max_files = attachment_max_files
+        self.attachment_max_chars = attachment_max_chars
         self.sessionmaker = sessionmaker
         self.models = models_port
         self.coordinator_id = coordinator_id
@@ -560,6 +569,8 @@ class BuiltinEngine:
             return False
         if run.kind == "reply":
             return await self._reply_step(run)
+        if run.step == "select":
+            return await self._select_step(run)
         if run.step == "brief":
             return await self._brief_step(run)
         if run.kind == "build":
@@ -887,6 +898,142 @@ class BuiltinEngine:
             await self._update(run.id, status="completed", step="done")
         return False
 
+    async def _project(self, run: models.Run) -> tuple[Workspace, str] | None:
+        """The workspace and project path of the run's room, if it is linked to a project."""
+        ws = self.workspace()
+        if ws is None:
+            return None
+        async with self.sessionmaker() as s:
+            room = await s.get(models.Room, run.room_id)
+        if room is None or not room.project_path or ws.project(room.project_path) is None:
+            return None
+        return ws, room.project_path
+
+    async def _select_step(self, run: models.Run) -> bool:
+        """Project rooms: attach the project card and rules, and let the lead agent pick files."""
+        start = project_files.first_step(run.kind)
+        found = await self._project(run)
+        if found is None or run.planner_id is None:
+            await self._update(run.id, step=start)
+            return True
+        ws, path = found
+        project = ws.project(path)
+        assert project is not None
+        async with self.sessionmaker() as s:
+            have = list(
+                (
+                    await s.scalars(
+                        select(models.RunAttachment.path).where(models.RunAttachment.run_id == run.id)
+                    )
+                ).all()
+            )
+        added = await self._attach(
+            run, ws, [p for p in project_files.context_paths(ws, project) if p not in have]
+        )
+        have += added
+        if run.agent_files:
+            tree = [e for e in ws.tree(project.path) if e.path not in have]
+            if tree:
+                self.raw_answers.pop(run.id, None)
+                msg_id = await self._agent_turn(
+                    run,
+                    run.planner_id,
+                    project_files.select_instruction(project, run.goal, tree, have),
+                    "select",
+                    run.last_message_id,
+                    project_files.SELECT_MAX_TOKENS,
+                    postprocess=project_files.strip_picks,
+                )
+                if msg_id is None or msg_id == WAITING:
+                    return False
+                async with self.sessionmaker() as s:
+                    posted = await s.scalar(
+                        select(models.Message.body_text).where(
+                            models.Message.sender_id == run.planner_id,
+                            models.Message.idempotency_key == f"{run.id}:select:reply",
+                        )
+                    )
+                raw = self.raw_answers.pop(run.id, None) or posted or ""
+                picks = project_files.parse_picks(raw, {e.path for e in tree})
+                picked = await self._attach(run, ws, picks)
+                have += picked
+                skipped = [p for p in picks if p not in picked]
+                note = "Reading for this run: " + (", ".join(picked) or "no extra files") + "."
+                if skipped:
+                    note += f" Skipped (over the file or size limit): {', '.join(skipped)}."
+                last = await self._post(
+                    run,
+                    self.coordinator_id,
+                    kind="task.status",
+                    text=note,
+                    key="select:note",
+                    reply_to=msg_id,
+                    data={"run_id": run.id, "status": "running", "step": "select", "files": picked},
+                )
+                await self._update(run.id, last_message_id=last)
+        await self._update(run.id, step=start)
+        return True
+
+    async def _attach(self, run: models.Run, ws: Workspace, paths: list[str]) -> list[str]:
+        """Snapshot workspace files onto the run, within the run's file and size limits."""
+        async with self.sessionmaker() as s:
+            rows = (
+                await s.execute(
+                    select(models.RunAttachment.path, models.RunAttachment.chars).where(
+                        models.RunAttachment.run_id == run.id
+                    )
+                )
+            ).all()
+            count, total = len(rows), sum(c for _, c in rows)
+            existing = {p for p, _ in rows}
+            added: list[str] = []
+            for rel in paths:
+                if rel in existing or count >= self.attachment_max_files:
+                    continue
+                try:
+                    snap = ws.read_snapshot(rel)
+                except (FileAccessError, OSError):
+                    continue
+                if total + snap.chars > self.attachment_max_chars:
+                    continue
+                s.add(
+                    models.RunAttachment(
+                        id=new_id("att"),
+                        run_id=run.id,
+                        path=snap.path,
+                        content=snap.content,
+                        chars=snap.chars,
+                        sha256=snap.sha256,
+                    )
+                )
+                count += 1
+                total += snap.chars
+                added.append(snap.path)
+            await s.commit()
+        return added
+
+    async def _save_to_project(
+        self, run: models.Run, brief: str, questions: list[str], before_brief: str | None
+    ) -> None:
+        """Best effort: save the brief and the run's final work into the project folder."""
+        found = await self._project(run)
+        if found is None:
+            return
+        ws, path = found
+        async with self.sessionmaker() as s:
+            fresh = await s.get(models.Run, run.id)
+            final = await s.get(models.Message, before_brief) if before_brief else None
+            author = await s.get(models.Principal, final.sender_id) if final is not None else None
+        record = project_files.RunRecord(
+            run_id=run.id, kind=run.kind, goal=run.goal, spent_usd=float(fresh.spent_usd if fresh else 0)
+        )
+        try:
+            project_files.save_brief(ws, path, record, brief, questions)
+            if final is not None and author is not None and author.kind in ("agent", "external"):
+                project_files.save_output(ws, path, record, author.display_name, final.body_text)
+        except (FileAccessError, OSError) as exc:
+            log.warning("run %s: could not save to project %s: %s", run.id, path, exc)
+
     async def _brief_step(self, run: models.Run) -> bool:
         """End of a run: the lead agent writes a decision brief for the owner."""
         if not run.write_brief:
@@ -966,7 +1113,7 @@ class BuiltinEngine:
             if already is None and fresh is not None and drafts:
                 await decisions.store(s, fresh, drafts)
                 await s.commit()
-        await self._update(
-            run.id, step="summary", brief=brief, pending_decisions=[d.question for d in drafts] or pending
-        )
+        questions = [d.question for d in drafts] or pending
+        await self._update(run.id, step="summary", brief=brief, pending_decisions=questions)
+        await self._save_to_project(run, brief, questions, run.last_message_id)
         return True

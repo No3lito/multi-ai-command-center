@@ -30,6 +30,7 @@ from command_center import auth, routes_b
 from command_center.config import Settings, get_settings
 from command_center.db import models
 from command_center.db.session import Database
+from command_center.files import FileAccessError
 from command_center.ids import new_id
 from command_center.logging_setup import configure_logging
 from command_center.mcp_gateway import build_gateway
@@ -48,6 +49,7 @@ from command_center.protocol import (
     RoomOut,
 )
 from command_center.providers.model_port import ModelPort
+from command_center.workspace import is_project_workspace, open_workspace
 
 log = logging.getLogger(__name__)
 
@@ -227,6 +229,9 @@ def create_app(config: Settings | None = None) -> FastAPI:
             reply_budget_usd=routes_b.DEFAULT_REPLY_BUDGET,
             simulated=settings.provider_mode == "simulated",
             max_runs_per_tree=settings.max_runs_per_tree,
+            workspace=lambda: open_workspace(settings.files_root, settings.sources_root),
+            attachment_max_files=settings.attachment_max_files,
+            attachment_max_chars=settings.attachment_max_chars,
         )
         worker = RunWorker(
             db.sessionmaker,
@@ -451,7 +456,14 @@ def create_app(config: Settings | None = None) -> FastAPI:
     @app.get("/api/rooms", response_model=list[RoomOut])
     async def rooms(principal: PrincipalDep, session: SessionDep) -> list[RoomOut]:
         return [
-            RoomOut(id=r.id, name=r.name, created_at=r.created_at, member_count=count, last_seq=r.last_seq)
+            RoomOut(
+                id=r.id,
+                name=r.name,
+                created_at=r.created_at,
+                member_count=count,
+                last_seq=r.last_seq,
+                project_path=r.project_path,
+            )
             for r, count in await service.list_rooms(session, principal.id)
         ]
 
@@ -459,12 +471,47 @@ def create_app(config: Settings | None = None) -> FastAPI:
     async def create_room(
         body: RoomCreateIn, request: Request, principal: PrincipalDep, session: SessionDep
     ) -> RoomOut:
+        project_path: str | None = None
+        if body.project_path or body.new_project:
+            if body.project_path and body.new_project:
+                raise ApiError(422, "validation_error", "Give project_path or new_project, not both")
+            ws = open_workspace(settings.files_root, settings.sources_root)
+            if not is_project_workspace(ws):
+                raise ApiError(422, "validation_error", "No project workspace is configured")
+            assert ws is not None
+            try:
+                if body.new_project:
+                    project = ws.create_project(
+                        body.new_project.family, body.new_project.name, body.new_project.goal
+                    )
+                    project_path = project.path
+                elif body.project_path:
+                    found = ws.project(body.project_path)
+                    if found is None:
+                        raise ApiError(
+                            422, "validation_error", "project_path: not a project in the workspace"
+                        )
+                    project_path = found.path
+            except (FileAccessError, OSError) as exc:
+                raise ApiError(422, "validation_error", f"project: {exc}") from exc
         try:
             room = await service.create_room(session, body.name, principal)
         except service.RoomExists as exc:
             raise ApiError(409, "room_exists", "A room with that name already exists") from exc
-        await audit(session, "room.create", principal.id, room.id, request, name=room.name)
-        return RoomOut(id=room.id, name=room.name, created_at=room.created_at, member_count=1, last_seq=0)
+        if project_path:
+            room.project_path = project_path
+            await session.commit()
+        await audit(
+            session, "room.create", principal.id, room.id, request, name=room.name, project=project_path
+        )
+        return RoomOut(
+            id=room.id,
+            name=room.name,
+            created_at=room.created_at,
+            member_count=1,
+            last_seq=0,
+            project_path=project_path,
+        )
 
     @app.get("/api/rooms/{room_id}", response_model=RoomDetailOut)
     async def room_detail(room_id: str, principal: PrincipalDep, session: SessionDep) -> RoomDetailOut:
@@ -476,6 +523,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
             created_at=room.created_at,
             member_count=len(members),
             last_seq=room.last_seq,
+            project_path=room.project_path,
             members=members,
         )
 

@@ -5,6 +5,7 @@ import { api, isApiError } from "@/lib/api";
 import { isRunActive, type Agent, type Room, type RoomDetail } from "@/lib/types";
 import { useAgents } from "@/lib/useAgents";
 import { useDecisions } from "@/lib/useDecisions";
+import { useWorkspace } from "@/lib/useWorkspace";
 import { useOutbox } from "@/lib/useOutbox";
 import { useRoomStream } from "@/lib/useRoomStream";
 import { useRuns } from "@/lib/useRuns";
@@ -13,6 +14,7 @@ import { AgentsPanel, type RoomAgent } from "./AgentsPanel";
 import { ConnectionsPanel } from "./ConnectionsPanel";
 import { DecisionsPanel } from "./DecisionsPanel";
 import { HistoryPanel } from "./HistoryPanel";
+import { InboxPanel, ProjectPanel, projectTitle } from "./ProjectPanels";
 import { Modal, RightTabs, type TabId } from "./RightTabs";
 import { SummaryPanel, lastSeenFor } from "./SummaryPanel";
 import { CollabForm } from "./CollabForm";
@@ -51,12 +53,28 @@ export function RoomView(props: Props) {
   const runs = useRuns(detail.kind === "ready" ? roomId : null, stream.messages, streamReady, { limit: 50 });
   const [tab, setTab] = useState<TabId>("decide");
   const [goalOpen, setGoalOpen] = useState(false);
+  const { workspace, reload: reloadWorkspace } = useWorkspace(api, `${roomId}:${tab}`);
   const usage = useUsage(stream.messages, streamReady);
   const decisions = useDecisions(detail.kind === "ready" ? roomId : null, runs.runs);
   const { answer: answerDecision } = decisions;
   const { addRun } = runs;
   const archiveRun = useCallback(async (runId: string) => addRun(await api.archiveRun(runId)), [addRun]);
   const closeGoal = useCallback(() => setGoalOpen(false), []);
+  const fileInbox = useCallback(
+    async (name: string, projectPath: string) => {
+      await api.fileInboxItem(name, projectPath);
+      reloadWorkspace();
+    },
+    [reloadWorkspace],
+  );
+  const setProject = useCallback(
+    async (projectPath: string | null) => {
+      if (!roomId) return;
+      const updated = await api.setRoomProject(roomId, projectPath);
+      setDetail({ kind: "ready", detail: updated });
+    },
+    [roomId],
+  );
   const onAnswer = useCallback(
     async (id: string, body: Parameters<typeof answerDecision>[1]) => {
       const result = await answerDecision(id, body);
@@ -159,6 +177,15 @@ export function RoomView(props: Props) {
               </span>
               {roomName}
             </span>
+            {roomDetail?.project_path && (
+              <span
+                data-testid="room-project"
+                title={roomDetail.project_path}
+                className="shrink-0 rounded bg-panel-2 px-1.5 py-px text-[11px] text-muted"
+              >
+                Project: {projectTitle(workspace, roomDetail.project_path)}
+              </span>
+            )}
             {memberCount !== undefined && (
               <span className="shrink-0 text-xs text-muted">
                 {memberCount} {memberCount === 1 ? "member" : "members"}
@@ -282,6 +309,7 @@ export function RoomView(props: Props) {
               agentName={agentName}
             />
             <DecisionsPanel runs={runs.runs} decisions={decisions.decisions} onAnswer={onAnswer} />
+            <InboxPanel workspace={workspace} onFile={fileInbox} />
           </div>
         )}
         {(tab === "runs" || !roomDetail || notFound) && (
@@ -312,6 +340,9 @@ export function RoomView(props: Props) {
         )}
         {tab === "setup" && (
           <div role="tabpanel" id="tabpanel-setup" aria-labelledby="tab-setup">
+            {roomDetail && !notFound && (
+              <ProjectPanel workspace={workspace} projectPath={roomDetail.project_path ?? null} onChange={setProject} />
+            )}
             <AgentsPanel
               hasRoom={!!roomDetail && !notFound}
               loading={agentsHook.state.kind === "loading"}
@@ -341,6 +372,12 @@ export function RoomView(props: Props) {
             externals={externals}
             createRun={api.createRun}
             listFiles={api.listFiles}
+            projectTitle={projectTitle(workspace, roomDetail.project_path)}
+            projectPath={roomDetail.project_path ?? null}
+            noProjectHint={workspace.structured && !roomDetail.project_path}
+            suggestFiles={
+              roomDetail.project_path ? (goal, signal) => api.suggestFiles(roomId, goal, signal) : undefined
+            }
             onStarted={(run) => {
               addRun(run);
               setGoalOpen(false);

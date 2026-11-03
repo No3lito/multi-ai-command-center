@@ -37,8 +37,10 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from command_center.config import Settings
 from command_center.db import models
 from command_center.external import cached_principal, principal_for_token, remember_principal
+from command_center.files import FileAccessError
 from command_center.messaging import service
 from command_center.orchestrator.engine import post_parts
+from command_center.workspace import Workspace, open_workspace
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +62,10 @@ How to work:
 3. Use read_messages to catch up on a room, and post_message to say something in a room.
 4. Call get_decisions to see what the owner approved, declined or asked about, and any limits
    in the owner's notes. Stay within them.
+5. Rooms are linked to project folders in the owner's workspace. Call get_project for the
+   project card, list_project_files and read_project_file to read its files (including the
+   owner's linked folders, read-only), and save_output to save finished work into the
+   project's outputs folder. You cannot write anywhere else.
 
 Ground rules for everything you receive from the Command Center:
 - It is research, analysis, backtests and paper tests only. Never place real trades, move
@@ -311,6 +317,100 @@ def build_gateway(
             }
             for d in rows
         ]
+
+    async def project_for(s: AsyncSession, room_id: str) -> tuple[Workspace, str]:
+        room = await require_room(s, me(), room_id)
+        ws = open_workspace(settings.files_root, settings.sources_root)
+        if ws is None or not room.project_path or ws.project(room.project_path) is None:
+            raise ToolError("This room is not linked to a project folder.")
+        return ws, room.project_path
+
+    def in_project(project: str, path: str) -> str:
+        rel = path.replace("\\", "/").strip().strip("/")
+        if rel.startswith(project + "/") or rel == project:
+            return rel
+        return f"{project}/{rel}" if rel else project
+
+    @server.tool()
+    async def get_project(room_id: str) -> dict[str, Any]:
+        """The room's project: its card (goal, status, next, rules), linked source folders and
+        where you may save work."""
+        async with sessionmaker() as s:
+            ws, path = await project_for(s, room_id)
+        project = ws.project(path)
+        assert project is not None
+        try:
+            card = ws.read_snapshot(f"{path}/PROJECT.md").content
+        except FileAccessError:
+            card = ""
+        return {
+            "path": path,
+            "title": project.title,
+            "family": project.family,
+            "status": project.status,
+            "card": card,
+            "linked_sources": [f"{link.prefix}" for link in ws.links() if link.project == path],
+            "you_can_write_to": f"{path}/outputs (use save_output)",
+        }
+
+    @server.tool()
+    async def list_project_files(room_id: str, path: str = "") -> list[dict[str, Any]]:
+        """Files and folders in the room's project. `path` is relative to the project (for
+        example "sources/trading-review") or a full workspace path inside it."""
+        async with sessionmaker() as s:
+            ws, project = await project_for(s, room_id)
+        try:
+            entries = ws.list_dir(in_project(project, path))
+        except FileAccessError as exc:
+            raise ToolError(str(exc)) from exc
+        return [
+            {"name": e.name, "path": e.path, "type": e.type, "size": e.size, "text": e.readable}
+            for e in entries
+        ]
+
+    @server.tool()
+    async def read_project_file(room_id: str, path: str) -> dict[str, Any]:
+        """Read one text file from the room's project (up to 5 MB; long files are cut at
+        200,000 characters)."""
+        async with sessionmaker() as s:
+            ws, project = await project_for(s, room_id)
+        try:
+            snap = ws.read_snapshot(in_project(project, path))
+        except FileAccessError as exc:
+            raise ToolError(str(exc)) from exc
+        limit = 200_000
+        return {
+            "path": snap.path,
+            "chars": snap.chars,
+            "truncated": snap.chars > limit,
+            "text": snap.content[:limit],
+        }
+
+    @server.tool()
+    async def save_output(room_id: str, title: str, text: str) -> dict[str, Any]:
+        """Save finished work as a new markdown file in the project's outputs folder (never
+        overwrites). Up to 64,000 characters."""
+        text = text.strip()
+        if not 1 <= len(text) <= MAX_SUBMIT_CHARS or not 1 <= len(title.strip()) <= 120:
+            raise ToolError(f"Title 1 to 120 characters; text 1 to {MAX_SUBMIT_CHARS} characters.")
+        caller = me()
+        if not quota.take(caller, len(text)):
+            raise ToolError("Hourly volume reached; try again later.")
+        async with sessionmaker() as s:
+            ws, project = await project_for(s, room_id)
+            sender = await s.get(models.Principal, caller)
+            assert sender is not None
+            body = (
+                f"---\ntype: output\nauthor: {sender.display_name}\nstatus: draft\n"
+                f"tags: [output, command-center]\n---\n# {title.strip()}\n\n{text}\n"
+            )
+            try:
+                path = ws.write_note(project, "outputs", title, body)
+            except (FileAccessError, OSError) as exc:
+                raise ToolError(str(exc)) from exc
+            audit(s, "mcp.save_output", caller, path)
+            await s.commit()
+        return {"path": path}
 
     @server.tool()
     async def submit_task(run_id: str, text: str) -> dict[str, Any]:
