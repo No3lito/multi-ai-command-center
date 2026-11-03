@@ -75,6 +75,7 @@ class RoomOut(Strict):
     created_at: datetime
     member_count: int
     last_seq: int
+    project_path: str | None = None
 
 
 class RoomDetailOut(RoomOut):
@@ -95,8 +96,17 @@ class LoginOut(Strict):
     principal: PrincipalOut
 
 
+class NewProjectIn(Strict):
+    family: str = Field(min_length=1, max_length=60)
+    name: str = Field(min_length=1, max_length=80)
+    goal: str = Field(default="", max_length=2000)
+
+
 class RoomCreateIn(Strict):
     name: str
+    # Link the room to an existing workspace project, or create a new one (not both).
+    project_path: str | None = Field(default=None, max_length=300)
+    new_project: NewProjectIn | None = None
 
     @field_validator("name")
     @classmethod
@@ -200,6 +210,39 @@ class FilesOut(Strict):
     max_chars: int
 
 
+class ProjectOut(Strict):
+    path: str
+    family: str
+    slug: str
+    title: str
+    status: str
+    goal: str
+
+
+class InboxItemOut(Strict):
+    name: str
+    size: int | None
+    suggested_project: str | None = None
+
+
+class WorkspaceOut(Strict):
+    enabled: bool
+    # True when the folder has the workspace layout (01-PROJECTS); false for a plain folder.
+    structured: bool
+    families: list[str]
+    projects: list[ProjectOut]
+    inbox: list[InboxItemOut]
+
+
+class RoomProjectIn(Strict):
+    project_path: str | None = Field(default=None, max_length=300)
+
+
+class InboxFileIn(Strict):
+    name: str = Field(min_length=1, max_length=255)
+    project_path: str = Field(min_length=1, max_length=300)
+
+
 class FollowUpPlanOut(Strict):
     workflow: str
     worker: str | None = None
@@ -280,6 +323,8 @@ class RunCreateIn(Strict):
     )
     # End the run with a decision brief: bottom line, decided, done, waiting on you, next steps.
     brief: bool = True
+    # In a project room: the lead agent picks the project files to read before the first step.
+    agent_files: bool = True
     budget_usd: float = Field(default=0.50, gt=0, le=5.0)
     max_turns: int = Field(default=8, ge=3, le=20)
 
@@ -303,6 +348,7 @@ class RunOut(Strict):
     brief: str | None = None
     pending_decisions: list[str] | None = None
     archived_at: datetime | None = None
+    agent_files: bool = True
     turn_count: int
     max_turns: int
     budget_usd: float

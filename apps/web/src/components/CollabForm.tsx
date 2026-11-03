@@ -69,9 +69,19 @@ interface Props {
   /** Lists the owner's shared folder; omit to hide file attachments. */
   listFiles?: (path?: string, signal?: AbortSignal) => Promise<FilesListing>;
   onStarted: (run: Run) => void;
+  /** Title of the room's workspace project, when it has one. */
+  projectTitle?: string | null;
 }
 
-export function CollabForm({ roomId, roomAgents, externals = [], createRun, listFiles, onStarted }: Props) {
+export function CollabForm({
+  roomId,
+  roomAgents,
+  externals = [],
+  createRun,
+  listFiles,
+  onStarted,
+  projectTitle = null,
+}: Props) {
   const usable = roomAgents.filter((r) => r.agent && isAgentUsable(r.agent));
   const [goal, setGoal] = useState("");
   const [workflowSel, setWorkflowSel] = useState<RunWorkflow | null>(null);
@@ -84,6 +94,7 @@ export function CollabForm({ roomId, roomAgents, externals = [], createRun, list
   const [busy, setBusy] = useState(false);
   const [attached, setAttached] = useState<PickedFile[]>([]);
   const [writeBrief, setWriteBrief] = useState(true);
+  const [agentFiles, setAgentFiles] = useState(true);
   const ids = {
     goal: useId(),
     workflow: useId(),
@@ -142,6 +153,7 @@ export function CollabForm({ roomId, roomAgents, externals = [], createRun, list
         max_turns: RUN_MAX_TURNS_DEFAULT,
         ...(attached.length > 0 ? { attachments: attached.map((f) => f.path) } : {}),
         ...(writeBrief ? {} : { brief: false }),
+        ...(projectTitle && !agentFiles ? { agent_files: false } : {}),
       };
       const run = await createRun(roomId, withWorker ? { ...body, workflow, builder_id: builderId } : body);
       setGoal("");
@@ -254,6 +266,21 @@ export function CollabForm({ roomId, roomAgents, externals = [], createRun, list
             />
             {errors.builderId && <ErrorText>{errors.builderId}</ErrorText>}
           </>
+        )}
+        {projectTitle && (
+          <label className="flex items-start gap-2 text-[11px] text-muted" data-testid="collab-agent-files-box">
+            <input
+              type="checkbox"
+              data-testid="collab-agent-files"
+              checked={agentFiles}
+              onChange={(e) => setAgentFiles(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Let the lead agent pick what to read from <strong className="text-fg">{projectTitle}</strong> (its card
+              and rules are always included)
+            </span>
+          </label>
         )}
         {listFiles && <AttachmentsPicker listFiles={listFiles} selected={attached} onChange={setAttached} />}
         <label className="flex items-center gap-2 text-[11px] text-muted">

@@ -221,3 +221,31 @@ describe("CollabForm", () => {
     );
   });
 });
+
+describe("CollabForm in a project room", () => {
+  it("lets the lead agent pick project files by default, and can turn it off", async () => {
+    const user = userEvent.setup();
+    const createRun = vi.fn(async () => run());
+    render(
+      <CollabForm
+        roomId={ROOM_A}
+        roomAgents={both}
+        createRun={createRun}
+        onStarted={() => {}}
+        projectTitle="Meme coin strategy"
+      />,
+    );
+    expect(screen.getByTestId("collab-agent-files-box")).toHaveTextContent("Meme coin strategy");
+    expect(screen.getByTestId("collab-agent-files")).toBeChecked();
+    await user.click(screen.getByTestId("collab-agent-files"));
+    await user.type(screen.getByTestId("collab-goal"), "Review it");
+    await user.click(screen.getByTestId("collab-start"));
+    await waitFor(() => expect(createRun).toHaveBeenCalled());
+    expect(createRun).toHaveBeenCalledWith(ROOM_A, expect.objectContaining({ agent_files: false }));
+  });
+
+  it("shows no project option outside project rooms", () => {
+    render(<CollabForm roomId={ROOM_A} roomAgents={both} createRun={vi.fn()} onStarted={() => {}} />);
+    expect(screen.queryByTestId("collab-agent-files-box")).not.toBeInTheDocument();
+  });
+});

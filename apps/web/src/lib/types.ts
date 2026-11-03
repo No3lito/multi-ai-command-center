@@ -18,6 +18,40 @@ export interface Room {
   member_count: number;
   /** Highest seq in this room; 0 for an empty room. seq is per room. */
   last_seq: number;
+  /** The workspace project this room works on, e.g. 01-PROJECTS/trading/meme-coin-strategy. */
+  project_path?: string | null;
+}
+
+/** A project folder in the owner's workspace. */
+export interface WorkspaceProject {
+  path: string;
+  family: string;
+  slug: string;
+  title: string;
+  status: string;
+  goal: string;
+}
+
+export interface InboxItem {
+  name: string;
+  size: number | null;
+  /** A free keyword guess at the right project. */
+  suggested_project: string | null;
+}
+
+export interface WorkspaceInfo {
+  enabled: boolean;
+  /** True when the folder has the workspace layout (01-PROJECTS). */
+  structured: boolean;
+  families: string[];
+  projects: WorkspaceProject[];
+  inbox: InboxItem[];
+}
+
+export interface NewProject {
+  family: string;
+  name: string;
+  goal?: string;
 }
 
 export interface RoomDetail extends Room {
@@ -233,6 +267,8 @@ export interface CreateRunBody {
   attachments?: string[];
   /** End the run with a decision brief (default true). */
   brief?: boolean;
+  /** In a project room: the lead agent picks the project files to read (default true). */
+  agent_files?: boolean;
   budget_usd?: number;
   max_turns?: number;
 }

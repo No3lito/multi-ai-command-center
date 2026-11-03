@@ -124,6 +124,10 @@ async def test_tokens_rooms_and_revocation(sim_srv: Server) -> None:
                 "get_tasks",
                 "get_decisions",
                 "submit_task",
+                "get_project",
+                "list_project_files",
+                "read_project_file",
+                "save_output",
             }
             me = await call(client, "whoami")
             assert me["name"] == "Grok Bot" and [r["name"] for r in me["rooms"]] == ["General"]

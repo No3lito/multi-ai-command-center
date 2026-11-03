@@ -61,6 +61,8 @@ class Room(Base):
     name: Mapped[str] = mapped_column(String(80), unique=True)
     created_by: Mapped[str] = mapped_column(ForeignKey("principals.id"))
     last_seq: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    # The workspace project this room works on (e.g. 01-PROJECTS/trading/meme-coin-strategy).
+    project_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -185,6 +187,8 @@ class Run(Base):
     write_brief: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     # Hidden from the chat and the run list; still searchable in History.
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # In a project room, the lead agent picks the project files to read before the first step.
+    agent_files: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     __table_args__ = (
         CheckConstraint("kind in ('collab','reply','build','review')", name="run_kind"),

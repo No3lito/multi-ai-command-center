@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     # A folder mounted read-only (Docker: FILES_FOLDER on the host -> /shared). Unset or
     # missing: attachments are off. Only text files are read, within the limits below.
     files_root: Path | None = None
+    # Linked project sources, each mounted read-only under this folder (see workspace.py).
+    sources_root: Path | None = None
     attachment_max_files: int = Field(default=10, ge=1, le=50)
     attachment_max_chars: int = Field(default=300_000, ge=1_000, le=2_000_000)  # per run, all files
 
