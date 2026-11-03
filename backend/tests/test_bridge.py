@@ -217,7 +217,7 @@ async def test_review_with_grok_bot_over_mcp(fresh_database_url: str, tmp_path: 
 
                 final = await wait_status(c, run["id"], {"completed", "failed"})
                 assert final["status"] == "completed", final
-                assert final["turn_count"] == 5
+                assert final["turn_count"] == 6
                 msgs = await run_messages(c, room_id, run["id"])
                 chats = [
                     (m["sender"]["display_name"], m["body"]["text"][:14]) for m in msgs if m["kind"] == "chat"
@@ -229,13 +229,14 @@ async def test_review_with_grok_bot_over_mcp(fresh_database_url: str, tmp_path: 
                     "GPT",
                     "Claude",
                     "Grok Bot",
+                    "Claude",
                 ]
                 assert chats[0][1] == "[Part 1 of 2]\n"
                 assert "Grok Bot shared its work" in msgs[-1]["body"]["text"]
                 assert len(msgs[-1]["body"]["text"]) < 400, "the summary does not repeat a long goal"
 
                 calls = await fake_calls(fake)
-                assert (calls["anthropic"], calls["openai"]) == (2, 1)
+                assert (calls["anthropic"], calls["openai"]) == (3, 1)
                 analyze = next(q["body"] for q in calls["requests"] if q["provider"] == "anthropic")
                 prompt = analyze["messages"][-1]["content"]
                 assert "H112 wallet basket" in prompt and "detail line" in prompt
@@ -244,12 +245,12 @@ async def test_review_with_grok_bot_over_mcp(fresh_database_url: str, tmp_path: 
                 reviewer_calls = [
                     q["body"] for q in calls["requests"] if q["provider"] in ("anthropic", "openai")
                 ]
-                assert len(reviewer_calls) == 3
+                assert len(reviewer_calls) == 4
                 assert all(rule in json.dumps(b) for b in reviewer_calls), (
                     "every reviewer step carries the rule"
                 )
                 anthropic_bodies = [q["body"] for q in calls["requests"] if q["provider"] == "anthropic"]
-                assert [b["max_tokens"] for b in anthropic_bodies] == [12_000, 12_000], "room to think"
+                assert [b["max_tokens"] for b in anthropic_bodies] == [12_000, 12_000, 6_000], "room to think"
                 assert all(b["output_config"] == {"effort": "medium"} for b in anthropic_bodies)
 
 

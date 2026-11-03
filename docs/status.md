@@ -2,6 +2,24 @@
 
 Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
 
+## Attached files and decision briefs (in review, branch `agent/claude/files-and-briefs`)
+
+- **Attached files:** Claude and GPT can read owner-chosen files from one folder, mounted read-only. Files are snapshotted when a run starts.
+- **Decision briefs:** every run ends with a fixed-format brief (bottom line, decided, done, waiting on you, next steps, open risks). A Decisions panel shows the latest conclusion and the open decisions.
+
+Contract: [`docs/api/files-and-briefs.md`](api/files-and-briefs.md).
+
+Evidence:
+
+- Backend: path safety (traversal, hidden files, links out, binary), snapshot freezing, prompt contents with the fake providers, brief parsing and storage.
+- Dashboard tests, and a browser test that sees the brief in the Decisions panel.
+
+**Verified by the owner (Nov 2, 2026, 8:36 PM ET):**
+
+- A real Plan & review run (Claude Sonnet 5.5 and GPT-6.1 Sol) read two attached files from the owner's Trading-Review folder: `HYPOTHESIS-REVIEW.md` and `FROZEN-SPECS-2026-11-02.md`.
+- It checked them against the agreed plan.
+- It ended with a decision brief. The Decisions panel showed the bottom line and three "Waiting on you" items.
+
 ## Grok Bot bridge (in review, branch `agent/claude/grok-bot-bridge`)
 
 The owner's Grok Bot (xAI's hosted agent app, with its own sub-agents and work) joins the Command Center over MCP. Its first job is a **Review & improve** run: Grok Bot shares its work, Claude and GPT review it and write a plan of fixes and new ideas, and Grok Bot responds. Contract and setup: [`docs/api/bridge.md`](api/bridge.md).

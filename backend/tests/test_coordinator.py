@@ -93,9 +93,12 @@ async def test_simulated_collab_run_end_to_end(sim_server: Server) -> None:
         assert run["simulated"] is True
         done = await wait_run(c, run["id"])
         assert done["status"] == "completed", done
-        assert done["turn_count"] == 3 and done["step"] == "done" and done["spent_usd"] == 0
+        assert done["turn_count"] == 4 and done["step"] == "done" and done["spent_usd"] == 0
+        assert done["brief"] and done["pending_decisions"] == [], "simulated brief, nothing pending"
         msgs = await run_messages(c, room_id, run["id"])
         assert [m["kind"] for m in msgs] == [
+            "task.assign",
+            "chat",
             "task.assign",
             "chat",
             "task.assign",
@@ -105,7 +108,7 @@ async def test_simulated_collab_run_end_to_end(sim_server: Server) -> None:
             "task.result",
         ]
         speakers = [m["sender"]["display_name"] for m in msgs if m["kind"] == "chat"]
-        assert speakers == ["Claude", "GPT", "Claude"]
+        assert speakers == ["Claude", "GPT", "Claude", "Claude"], "the lead writes the decision brief"
         for prev, m in itertools.pairwise(msgs):
             assert m["reply_to"] == prev["id"], "each step replies to the previous message"
         for m in msgs:
@@ -239,13 +242,19 @@ async def test_live_code_path_with_fake_providers(fresh_database_url: str, tmp_p
                 done = await wait_run(c, run["id"])
                 assert done["status"] == "completed", done
                 calls = await fake_calls(fake)
-                assert (calls["anthropic"], calls["openai"]) == (2, 1)
-                assert calls["models"] == ["claude-sonnet-5-5", "gpt-6.1-sol", "claude-sonnet-5-5"]
-                # 100 input + 50 output tokens per call at $2/$10 per 1M = $0.0007 per call.
-                assert done["spent_usd"] == pytest.approx(0.0021)
+                assert (calls["anthropic"], calls["openai"]) == (3, 1)
+                assert calls["models"] == [
+                    "claude-sonnet-5-5",
+                    "gpt-6.1-sol",
+                    "claude-sonnet-5-5",
+                    "claude-sonnet-5-5",
+                ]
+                # 100 input + 50 output tokens per call at $2/$10 per 1M = $0.0007 per call (4 calls,
+                # the last one the decision brief).
+                assert done["spent_usd"] == pytest.approx(0.0028)
                 usage = (await c.get("/api/usage")).json()
-                assert usage["spent_usd"] == pytest.approx(0.0021) and usage["reserved_usd"] == 0
-                assert usage["remaining_usd"] == pytest.approx(1.0 - 0.0021)
+                assert usage["spent_usd"] == pytest.approx(0.0028) and usage["reserved_usd"] == 0
+                assert usage["remaining_usd"] == pytest.approx(1.0 - 0.0028)
                 chats = [m for m in await run_messages(c, room_id, run["id"]) if m["kind"] == "chat"]
                 assert all(m["body"]["data"]["simulated"] is False for m in chats)
                 assert all("[FAKE PROVIDER]" in m["body"]["text"] for m in chats)

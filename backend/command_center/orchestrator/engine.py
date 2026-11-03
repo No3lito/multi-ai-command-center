@@ -30,15 +30,15 @@ log = logging.getLogger(__name__)
 MAX_REPLY_HOPS = 3
 MAX_MENTIONS_PER_MESSAGE = 5
 DEFAULT_MAX_RUNS_PER_TREE = 10
-COLLAB_STEPS = ("plan", "critique", "revise", "summary")
+COLLAB_STEPS = ("plan", "critique", "revise", "brief", "summary")
 # Design & build: two co-designers with one goal direct a builder. The builder adds a short
 # build note, implements the final design exactly (including any code-level instructions),
 # and applies the co-designer's fix instructions if the check finds problems.
-BUILD_STEPS = ("design", "codesign", "feasibility", "finalize", "build", "check", "fix", "summary")
+BUILD_STEPS = ("design", "codesign", "feasibility", "finalize", "build", "check", "fix", "brief", "summary")
 APPROVED = "APPROVED"
 # Review & improve: an agent (often an external one such as Grok Bot) shares its work, two
 # co-reviewers analyze it and write a plan, and the agent says how it will carry it out.
-REVIEW_STEPS = ("share", "analyze", "ideas", "plan", "respond", "summary")
+REVIEW_STEPS = ("share", "analyze", "ideas", "plan", "respond", "brief", "summary")
 # Returned by _agent_turn when the step belongs to an external agent: the run now waits.
 WAITING = "__waiting__"
 # Applies to every step of a review, for reviewers and the worker alike.
@@ -51,6 +51,8 @@ FEASIBILITY_MAX_TOKENS = 400
 # Reviewer and designer steps: room for the model's thinking plus a long answer (thinking
 # tokens count toward the limit on Claude 5.5 and GPT reasoning models).
 DEEP_STEP_MAX_TOKENS = 12_000
+BRIEF_MAX_TOKENS = 6_000
+BRIEF_HEADINGS = ("Bottom line", "Decided", "Done", "Waiting on you", "Next steps", "Open risks")
 BUILD_MAX_TOKENS = 8192
 FINISHED = {"completed", "failed", "cancelled", "budget_exceeded"}
 
@@ -192,6 +194,28 @@ def short_goal(goal: str, limit: int = 160) -> str:
     first = goal.strip().splitlines()[0] if goal.strip() else ""
     first = first.rstrip(" .")
     return first if len(first) <= limit else first[: limit - 3].rstrip() + "..."
+
+
+def parse_waiting_on_you(brief: str) -> list[str]:
+    """The items under the brief's "Waiting on you" heading; empty when there are none."""
+    items: list[str] = []
+    inside = False
+    for raw in brief.splitlines():
+        line = raw.strip()
+        bare = line.strip("*#_ ").lower()
+        heading = next((h for h in BRIEF_HEADINGS if bare.startswith(h.lower())), None)
+        if heading is not None:
+            inside = heading == "Waiting on you"
+            rest = line.split(":", 1)[1].strip().strip("*_ ") if ":" in line else ""
+            if inside and rest and rest.lower().rstrip(".") not in ("nothing", "none", "n/a"):
+                items.append(rest)
+            continue
+        if (inside and line[:1] in "-*•") or (inside and line[:2].rstrip(".").isdigit()):
+            item = line.lstrip("-*• ").split(". ", 1)[-1] if line[:1].isdigit() else line.lstrip("-*• ")
+            item = item.strip()
+            if item and item.lower().rstrip(".") not in ("nothing", "none", "n/a"):
+                items.append(item)
+    return items[:20]
 
 
 MESSAGE_TEXT_LIMIT = 32_000  # CCMP v1 body.text maxLength
@@ -525,6 +549,8 @@ class BuiltinEngine:
             return False
         if run.kind == "reply":
             return await self._reply_step(run)
+        if run.step == "brief":
+            return await self._brief_step(run)
         if run.kind == "build":
             return await self._build_step(run)
         if run.kind == "review":
@@ -692,8 +718,9 @@ class BuiltinEngine:
             ),
         }
         if run.step == "fix" and await self._approved(run):
-            await self._update(run.id, step="summary")
-            run.step = "summary"
+            # Approved: no fixes needed; go on to the decision brief.
+            await self._update(run.id, step="brief")
+            return True
         if run.step in plans:
             agent_id, announce, instruction, limit = plans[run.step]
             assign_id = await self._post(
@@ -848,3 +875,53 @@ class BuiltinEngine:
             )
             await self._update(run.id, status="completed", step="done")
         return False
+
+    async def _brief_step(self, run: models.Run) -> bool:
+        """End of a run: the lead agent writes a decision brief for the owner."""
+        if not run.write_brief:
+            await self._update(run.id, step="summary")
+            return True
+        assert run.planner_id is not None
+        async with self.sessionmaker() as s:
+            lead = await s.get(models.Principal, run.planner_id)
+        if lead is None:
+            await self._update(run.id, step="summary")
+            return True
+        p = lead.display_name
+        assign_id = await self._post(
+            run,
+            self.coordinator_id,
+            kind="task.assign",
+            text=f"Wrap-up: @{p}, write the decision brief for the owner.",
+            key="brief:assign",
+            reply_to=run.last_message_id,
+            data={"run_id": run.id, "status": "running", "step": "brief"},
+        )
+        rule = f" {RESEARCH_ONLY}" if run.kind == "review" else ""
+        instruction = (
+            f"Write the decision brief for the owner about this run ({short_goal(run.goal)}). Use exactly "
+            "these bold headings, in this order, each followed by short bullets:\n"
+            "**Bottom line:** one or two sentences.\n"
+            "**Decided:** what the participants agreed.\n"
+            "**Done:** only what was actually completed during this run, and by whom.\n"
+            "**Waiting on you:** each decision only the owner can make: what to decide, why it "
+            "matters, and the cost if known. Write 'Nothing' if there is none.\n"
+            "**Next steps:** numbered; who does what, in order.\n"
+            "**Open risks:** what is still uncertain.\n"
+            "Base it only on the conversation above and do not invent results. Under 350 words." + rule
+        )
+        msg_id = await self._agent_turn(
+            run, run.planner_id, instruction, "brief", assign_id, BRIEF_MAX_TOKENS
+        )
+        if msg_id is None or msg_id == WAITING:
+            return False
+        async with self.sessionmaker() as s:
+            text = await s.scalar(
+                select(models.Message.body_text).where(
+                    models.Message.sender_id == run.planner_id,
+                    models.Message.idempotency_key == f"{run.id}:brief:reply",
+                )
+            )
+        brief = text or ""
+        await self._update(run.id, step="summary", brief=brief, pending_decisions=parse_waiting_on_you(brief))
+        return True

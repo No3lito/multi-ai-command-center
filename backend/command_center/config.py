@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     mcp_host: str = "127.0.0.1"
     mcp_port: int = Field(default=8001, ge=0, le=65535)
     mcp_requests_per_minute: int = Field(default=120, ge=1, le=10_000)
+    # ---- Files the owner can attach to runs (read-only) ----
+    # A folder mounted read-only (Docker: FILES_FOLDER on the host -> /shared). Unset or
+    # missing: attachments are off. Only text files are read, within the limits below.
+    files_root: Path | None = None
+    attachment_max_files: int = Field(default=10, ge=1, le=50)
+    attachment_max_chars: int = Field(default=300_000, ge=1_000, le=2_000_000)  # per run, all files
+
     # A run waiting for an external agent fails after this long without an answer.
     external_task_timeout_hours: float = Field(default=24.0, gt=0, le=24 * 30)
     default_claude_model: str = "claude-sonnet-5-5"

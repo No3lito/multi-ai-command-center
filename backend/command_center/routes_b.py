@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, Query, Request
 from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from command_center import files
 from command_center.config import Settings
 from command_center.db import models
 from command_center.db.session import Database
@@ -19,9 +20,12 @@ from command_center.protocol import (
     AgentIn,
     AgentOut,
     AgentPatch,
+    AttachmentOut,
     ConnectionIn,
     ConnectionOut,
     ConnectionRoom,
+    FileEntryOut,
+    FilesOut,
     MemberIn,
     PriceOut,
     RoomDetailOut,
@@ -127,8 +131,12 @@ def agent_out(settings: Settings, p: models.Principal, a: models.AgentProfile) -
     )
 
 
-def run_out(r: models.Run) -> RunOut:
+def run_out(r: models.Run, attachments: list[AttachmentOut] | None = None) -> RunOut:
     return RunOut(
+        attachments=attachments or [],
+        write_brief=r.write_brief if r.write_brief is not None else True,
+        brief=r.brief,
+        pending_decisions=r.pending_decisions,
         id=r.id,
         room_id=r.room_id,
         kind=r.kind,
@@ -301,6 +309,31 @@ def register(
             allowed = agents | externals if role == "builder" else agents
             if agent_id not in allowed:
                 raise api_error(422, "validation_error", f"{role}_id: not an enabled agent in this room")
+        # Attachments: snapshot each file now, so every step sees the same version.
+        snapshots: list[files.Snapshot] = []
+        wanted = list(dict.fromkeys(body.attachments))
+        if wanted:
+            root = settings.files_root
+            if not files.available(root):
+                raise api_error(422, "validation_error", "attachments: no shared folder is configured")
+            assert root is not None
+            if len(wanted) > settings.attachment_max_files:
+                raise api_error(
+                    422, "validation_error", f"attachments: at most {settings.attachment_max_files} files"
+                )
+            for rel in wanted:
+                try:
+                    snapshots.append(files.read_snapshot(root, rel))
+                except (files.FileAccessError, OSError) as exc:
+                    raise api_error(422, "validation_error", f"attachments: {exc}") from exc
+            total = sum(s.chars for s in snapshots)
+            if total > settings.attachment_max_chars:
+                raise api_error(
+                    422,
+                    "validation_error",
+                    f"attachments: {total:,} characters in total; "
+                    f"the limit is {settings.attachment_max_chars:,}",
+                )
         run_id = new_id("run")
         run = models.Run(
             id=run_id,
@@ -313,22 +346,39 @@ def register(
             planner_id=body.planner_id,
             critic_id=body.critic_id,
             builder_id=body.builder_id,
-            # A build run needs up to 7 agent turns, a review run 5.
-            max_turns=max(body.max_turns, 7)
-            if build
-            else max(body.max_turns, 5)
-            if review
-            else body.max_turns,
+            # Agent turns needed: build 7, review 5, plan & review 3, plus one for the brief.
+            max_turns=max(body.max_turns, (7 if build else 5 if review else 3) + (1 if body.brief else 0)),
+            write_brief=body.brief,
             budget_usd=Decimal(str(body.budget_usd)),
             spent_usd=Decimal(0),
             simulated=settings.provider_mode == "simulated",
             created_by=principal.id,
         )
         session.add(run)
+        await session.flush()
+        for snap in snapshots:
+            session.add(
+                models.RunAttachment(
+                    id=new_id("att"),
+                    run_id=run.id,
+                    path=snap.path,
+                    content=snap.content,
+                    chars=snap.chars,
+                    sha256=snap.sha256,
+                )
+            )
         await session.commit()
-        await audit(session, "run.create", principal.id, run.id, request, budget_usd=body.budget_usd)
+        await audit(
+            session,
+            "run.create",
+            principal.id,
+            run.id,
+            request,
+            budget_usd=body.budget_usd,
+            attachments=[s.path for s in snapshots],
+        )
         wake()
-        return run_out(run)
+        return run_out(run, [AttachmentOut(path=s.path, chars=s.chars) for s in snapshots])
 
     @app.get("/api/rooms/{room_id}/runs", response_model=list[RunOut])
     async def list_runs(
@@ -344,7 +394,53 @@ def register(
             .order_by(models.Run.created_at.desc())
             .limit(limit)
         )
-        return [run_out(r) for r in rows]
+        runs = list(rows.all())
+        atts = await attachments_for(session, [r.id for r in runs])
+        return [run_out(r, atts.get(r.id)) for r in runs]
+
+    async def attachments_for(session: AsyncSession, run_ids: list[str]) -> dict[str, list[AttachmentOut]]:
+        if not run_ids:
+            return {}
+        rows = await session.execute(
+            select(models.RunAttachment.run_id, models.RunAttachment.path, models.RunAttachment.chars)
+            .where(models.RunAttachment.run_id.in_(run_ids))
+            .order_by(models.RunAttachment.created_at, models.RunAttachment.path)
+        )
+        out: dict[str, list[AttachmentOut]] = {}
+        for run_id, path, chars in rows.all():
+            out.setdefault(run_id, []).append(AttachmentOut(path=path, chars=chars))
+        return out
+
+    # ------------------------------------------------------------ shared files (read-only)
+
+    @app.get("/api/files", response_model=FilesOut)
+    async def list_files(principal: PrincipalDep, path: str = "") -> FilesOut:
+        """Browse the shared folder (owner only) to pick files to attach to a run."""
+        require_owner(principal)
+        root = settings.files_root
+        if not files.available(root):
+            return FilesOut(
+                enabled=False,
+                path="",
+                entries=[],
+                max_files=settings.attachment_max_files,
+                max_chars=settings.attachment_max_chars,
+            )
+        assert root is not None
+        try:
+            entries = files.list_dir(root, path)
+        except files.FileAccessError as exc:
+            raise api_error(422, "validation_error", str(exc)) from exc
+        return FilesOut(
+            enabled=True,
+            path=path.replace("\\", "/").strip("/"),
+            entries=[
+                FileEntryOut(name=e.name, path=e.path, type=e.type, size=e.size, readable=e.readable)
+                for e in entries
+            ],
+            max_files=settings.attachment_max_files,
+            max_chars=settings.attachment_max_chars,
+        )
 
     async def own_run(session: AsyncSession, run_id: str, principal: models.Principal) -> models.Run:
         run = await session.get(models.Run, run_id)
@@ -355,7 +451,8 @@ def register(
 
     @app.get("/api/runs/{run_id}", response_model=RunOut)
     async def get_run(run_id: str, principal: PrincipalDep, session: SessionDep) -> RunOut:
-        return run_out(await own_run(session, run_id, principal))
+        run = await own_run(session, run_id, principal)
+        return run_out(run, (await attachments_for(session, [run.id])).get(run.id))
 
     @app.post("/api/runs/{run_id}/cancel", response_model=RunOut)
     async def cancel_run(

@@ -247,9 +247,15 @@ def build_gateway(
                 .order_by(models.Message.seq)
             )
         ).all()
+        attached = (
+            await s.scalars(select(models.RunAttachment.path).where(models.RunAttachment.run_id == run.id))
+        ).all()
         return {
             "run_id": run.id,
             "room": {"id": run.room_id, "name": room.name if room else None},
+            # Names only: the owner attached these for the reviewers; their contents are not
+            # sent to external agents.
+            "attached_files_seen_by_reviewers": list(attached),
             "workflow": run.kind,
             "goal": run.goal,
             "step": run.step,

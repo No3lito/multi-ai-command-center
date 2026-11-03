@@ -10,6 +10,7 @@ import { useRuns } from "@/lib/useRuns";
 import { useUsage } from "@/lib/useUsage";
 import { AgentsPanel, type RoomAgent } from "./AgentsPanel";
 import { ConnectionsPanel } from "./ConnectionsPanel";
+import { DecisionsPanel } from "./DecisionsPanel";
 import { CollabForm } from "./CollabForm";
 import { Composer, type MentionAgent } from "./Composer";
 import { ConnectionPill } from "./ConnectionPill";
@@ -229,6 +230,7 @@ export function RoomView(props: Props) {
         lastSeq={stream.lastSeq}
         hasRoom={!!roomId && !notFound}
       >
+        {roomDetail && !notFound && <DecisionsPanel runs={runs.runs} />}
         <AgentsPanel
           hasRoom={!!roomDetail && !notFound}
           loading={agentsHook.state.kind === "loading"}
@@ -244,6 +246,7 @@ export function RoomView(props: Props) {
             roomAgents={roomAgents}
             externals={externals}
             createRun={api.createRun}
+            listFiles={api.listFiles}
             onStarted={runs.addRun}
           />
         )}

@@ -179,6 +179,27 @@ class AgentOut(Strict):
     price: PriceOut | None
 
 
+class AttachmentOut(Strict):
+    path: str
+    chars: int
+
+
+class FileEntryOut(Strict):
+    name: str
+    path: str
+    type: Literal["dir", "file"]
+    size: int | None
+    readable: bool
+
+
+class FilesOut(Strict):
+    enabled: bool
+    path: str
+    entries: list[FileEntryOut]
+    max_files: int
+    max_chars: int
+
+
 class ConnectionIn(Strict):
     """An external agent (for example Grok Bot) that connects over MCP with a token."""
 
@@ -219,6 +240,13 @@ class RunCreateIn(Strict):
     planner_id: str = Field(pattern=PRINCIPAL_ID)
     critic_id: str = Field(pattern=PRINCIPAL_ID)
     builder_id: str | None = Field(default=None, pattern=PRINCIPAL_ID)
+    # Files from the shared folder (paths relative to it), read once when the run starts and
+    # shown to the model agents. Requires FILES_ROOT.
+    attachments: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
+        default_factory=list, max_length=50
+    )
+    # End the run with a decision brief: bottom line, decided, done, waiting on you, next steps.
+    brief: bool = True
     budget_usd: float = Field(default=0.50, gt=0, le=5.0)
     max_turns: int = Field(default=8, ge=3, le=20)
 
@@ -237,6 +265,10 @@ class RunOut(Strict):
     root_run_id: str | None = None
     # status "waiting": the external agent whose turn it is.
     waiting_for: str | None = None
+    attachments: list[AttachmentOut] = Field(default_factory=list)
+    write_brief: bool = True
+    brief: str | None = None
+    pending_decisions: list[str] | None = None
     turn_count: int
     max_turns: int
     budget_usd: float

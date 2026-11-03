@@ -136,6 +136,13 @@ export interface Run {
   root_run_id?: string | null;
   /** Set while status is "waiting": the external agent whose turn it is. */
   waiting_for?: string | null;
+  /** Owner-chosen files the reviewers read (snapshots taken when the run started). */
+  attachments?: { path: string; chars: number }[];
+  write_brief?: boolean;
+  /** The decision brief that ends the run (markdown), once written. */
+  brief?: string | null;
+  /** The "Waiting on you" items from the brief. */
+  pending_decisions?: string[] | null;
   turn_count: number;
   max_turns: number;
   budget_usd: number;
@@ -170,6 +177,10 @@ export interface CreateRunBody {
   planner_id: string;
   critic_id: string;
   builder_id?: string;
+  /** Paths inside the shared folder, read once when the run starts. */
+  attachments?: string[];
+  /** End the run with a decision brief (default true). */
+  brief?: boolean;
   budget_usd?: number;
   max_turns?: number;
 }
@@ -204,3 +215,20 @@ export const isRunActive = (run: Pick<Run, "status">): boolean => ACTIVE_RUN_STA
 /** Agents that can take a turn right now. */
 export const isAgentUsable = (agent: Pick<Agent, "status">): boolean =>
   agent.status === "live" || agent.status === "simulated";
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  type: "dir" | "file";
+  size: number | null;
+  /** A text file that can be attached. */
+  readable: boolean;
+}
+
+export interface FilesListing {
+  enabled: boolean;
+  path: string;
+  entries: FileEntry[];
+  max_files: number;
+  max_chars: number;
+}

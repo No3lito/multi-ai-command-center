@@ -68,16 +68,21 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   await expect(runItem.getByTestId("run-cancel")).toHaveCount(0);
   await expect(runItem.getByTestId("run-spent")).toHaveText("$0.00 of $0.50");
 
-  // Coordinator: three task.assign notes (plan, critique, revise) and one task.result.
+  // The run ends with a decision brief, shown in the Decisions panel.
+  const decisions = page.getByTestId("decisions-panel");
+  await expect(decisions.getByTestId("decision-latest")).toBeVisible();
+  await expect(decisions.getByTestId("decision-waiting")).toBeVisible();
+
+  // Coordinator: four task.assign notes (plan, critique, revise, brief) and one task.result.
   const notes = messages(page, { senderKind: "system", correlationId: runId! });
-  await expect(notes).toHaveCount(4, { timeout: 10_000 });
-  await expect(notes.and(page.locator('[data-note-kind="task.assign"]'))).toHaveCount(3);
+  await expect(notes).toHaveCount(5, { timeout: 10_000 });
+  await expect(notes.and(page.locator('[data-note-kind="task.assign"]'))).toHaveCount(4);
   await expect(notes.and(page.locator('[data-note-kind="task.result"]'))).toHaveCount(1);
 
-  // Agents: plan (Claude), critique (GPT), revise (Claude), each badged SIMULATED.
+  // Agents: plan (Claude), critique (GPT), revise (Claude), decision brief (Claude), each SIMULATED.
   const agentMsgs = messages(page, { senderKind: "agent", correlationId: runId! });
-  await expect(agentMsgs).toHaveCount(3);
-  for (let i = 0; i < 3; i += 1) {
+  await expect(agentMsgs).toHaveCount(4);
+  for (let i = 0; i < 4; i += 1) {
     await expect(agentMsgs.nth(i).getByTestId("simulated-badge")).toHaveText("SIMULATED");
   }
   await expect(messages(page, { senderKind: "system", correlationId: runId! }).getByTestId("simulated-badge")).toHaveCount(0);
@@ -150,8 +155,8 @@ test("simulated design & build: Claude and GPT design, Grok builds and applies f
 
   // Simulated answers never say APPROVED, so all 7 steps run, in this order.
   const agentMsgs = messages(page, { senderKind: "agent", correlationId: runId! });
-  await expect(agentMsgs).toHaveCount(7, { timeout: 10_000 });
-  const order = ["Claude", "GPT", "Grok", "Claude", "Grok", "GPT", "Grok"];
+  await expect(agentMsgs).toHaveCount(8, { timeout: 10_000 });
+  const order = ["Claude", "GPT", "Grok", "Claude", "Grok", "GPT", "Grok", "Claude"];
   for (let i = 0; i < order.length; i += 1) {
     await expect(agentMsgs.nth(i)).toContainText(order[i]);
     await expect(agentMsgs.nth(i).getByTestId("simulated-badge")).toHaveText("SIMULATED");

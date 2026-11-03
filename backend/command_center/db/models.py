@@ -179,6 +179,10 @@ class Run(Base):
     waiting_for: Mapped[str | None] = mapped_column(ForeignKey("principals.id"), nullable=True)
     waiting_instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
     waiting_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The final decision brief (markdown) and the "Waiting on you" items parsed from it.
+    brief: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pending_decisions: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    write_brief: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     __table_args__ = (
         CheckConstraint("kind in ('collab','reply','build','review')", name="run_kind"),
@@ -267,3 +271,20 @@ class AgentToken(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("agent_tokens_by_principal", "principal_id"),)
+
+
+class RunAttachment(Base):
+    """A read-only snapshot of a file the owner attached to a run, taken when the run starts,
+    so every step sees the same content. Shown to model agents only."""
+
+    __tablename__ = "run_attachments"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
+    path: Mapped[str] = mapped_column(String(500))
+    content: Mapped[str] = mapped_column(Text)
+    chars: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("run_attachments_by_run", "run_id"),)
