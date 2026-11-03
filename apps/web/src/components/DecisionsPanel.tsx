@@ -299,7 +299,7 @@ export function whatHappens(d: Decision, answer: DecisionAnswer, budget: number 
   if (d.code_pr) {
     const n = `pull request #${d.code_pr.number}`;
     if (answer === "approve")
-      return `Merges ${n} into main on GitHub. With automatic updates on, your Command Center loads it within about 5 minutes.`;
+      return `Merges ${n} into main on GitHub, only if its automatic tests passed. With automatic updates on, your Command Center loads it within about 5 minutes.`;
     if (answer === "decline") return `Closes ${n} on GitHub without merging. Nothing changes in your code.`;
     if (answer === "more_info")
       return `Sends ${n} back: the same writer applies your note, the tests run, and the reviewer checks it again (up to the code job budget).`;

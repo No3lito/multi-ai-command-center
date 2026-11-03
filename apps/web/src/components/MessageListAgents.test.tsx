@@ -18,7 +18,9 @@ describe("MessageList with agents", () => {
   });
 
   it("shows cost and no badge on live agent messages", () => {
-    renderList([agentMsg(1, { usage: { input_tokens: 10, output_tokens: 5, cost_usd: 0.0123 } }, { simulated: false })]);
+    renderList([
+      agentMsg(1, { usage: { input_tokens: 10, output_tokens: 5, cost_usd: 0.0123 } }, { simulated: false }),
+    ]);
     expect(screen.queryByTestId("simulated-badge")).toBeNull();
     expect(screen.getByTestId("message-usage")).toHaveTextContent("$0.0123");
   });
@@ -42,7 +44,8 @@ describe("MessageList with agents", () => {
     expect(items[1]).toHaveTextContent("Run finished <b>ok</b>");
     expect(items[1]!.querySelector("b")).toBeNull();
     expect(items[2]).toHaveAttribute("data-note-kind", "error");
-    expect(items[2]!.className).toContain("bg-danger-soft");
-    expect(items[0]!.className).not.toContain("bg-danger-soft");
+    // Errors are action notes; globals.css paints .system-action[data-note-kind="error"] red.
+    expect(items[2]!.className).toContain("system-action");
+    expect(items[0]!.getAttribute("data-note-kind")).not.toBe("error");
   });
 });

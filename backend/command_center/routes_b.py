@@ -982,6 +982,17 @@ def register(
                         "merge_refused",
                         f"Not merged: pull request #{pr.number} {why or 'has no reviewed commit on record'}.",
                     )
+                # Never merge on red: the tests must have passed on the exact commit being merged.
+                ci = await gh.ci(str(raw["head_sha"]))
+                if ci.status != "success":
+                    reason = {
+                        "failure": "its automatic tests failed. Click Need more info to send it back for a "
+                        "fix",
+                        "pending": "its automatic tests are still running. Try again in a few minutes",
+                    }.get(ci.status, "no automatic tests ran on it, so it is not verified")
+                    raise api_error(
+                        409, "tests_not_passed", f"Not merged: pull request #{pr.number}: {reason}."
+                    )
                 await gh.merge(pr.number, pr.title or f"Pull request #{pr.number}", str(raw["head_sha"]))
                 return (
                     f"Merged pull request #{pr.number} on GitHub. With automatic updates on, this computer "
