@@ -29,5 +29,6 @@ next 16.4.4 · react 19.3.1 · tailwindcss 4.3.3 · vitest 5.1.0 · @playwright/
 
 ## Status
 - Merged to main: Milestone B, the Grok builder, the Grok Bot bridge, files and briefs, and decision cards (PR #8).
-- In review: PR #9 (self-serve dashboard), PR #10 (project workspace), PR #11 (conclude, don't loop), PR #12 (dashboard redesign) and code jobs.
+- Merged: PR #9 to #13 (self-serve dashboard, project workspace, conclude, dashboard redesign, code jobs), and the first code jobs: #14 (README note) and #15 (resizable Room details panel).
+- After a merge, the owner's computer updates itself within about 5 minutes when automatic updates are on (`infrastructure/install-auto-update.ps1`).
 - New rooms include every agent that can answer (Claude and GPT). The "collab" workflow is labeled **Collaborate** on the dashboard.

@@ -2,7 +2,17 @@
 
 Updated Nov 3, 2026. This file is the single place to see what works, what was tested, and what is blocked.
 
-## Code jobs (in review, branch `agent/claude/code-jobs`, stacked on PR #12)
+## Automatic updates (in review, branch `agent/claude/auto-update`)
+
+Also merged by the owner's code jobs: PR #14 (README note) and PR #15 (resizable Room details panel).
+
+After the owner approves a code job, the Command Center on his computer updates itself; no more `git pull` and `docker compose up -d --build`.
+
+- `infrastructure/install-auto-update.ps1` creates a Windows scheduled task that runs `infrastructure/auto-update.ps1` hidden every 5 minutes and at sign-in. `-Remove` turns it off.
+- It only acts on `main` with no local edits to tracked files, only fast-forwards, skips when Docker is not running, rebuilds, then checks `/api/health`. Everything goes to `logs/auto-update.log`.
+- Evidence: both scripts parse in PowerShell 7.4.6; `auto-update.ps1` was run against a test repository with a fake Docker and a fake app (updates and reports healthy; silent when nothing is new; leaves other branches, local edits and a stopped Docker alone). The scheduled task itself is Windows-only and was not run here.
+
+## Code jobs (merged in PR #13)
 
 Claude and GPT change the Command Center's code together; Noel decides with one click. Contract: [`docs/api/code-jobs.md`](api/code-jobs.md).
 
@@ -21,7 +31,7 @@ Evidence (FAKE ADAPTER and FAKE GITHUB; not yet run against real GitHub):
 
 Needs from the owner: a fine-grained GitHub token limited to this repository (see the contract), placed in `.env` only.
 
-## Dashboard redesign (in review, branch `agent/claude/dashboard-redesign`, stacked on PR #11)
+## Dashboard redesign (merged in PR #12)
 
 Built from the spec Claude and GPT wrote in the first self-review (D1 to D4, V1 to V4, D6, D8 and D9 phase 1):
 
@@ -40,7 +50,7 @@ Evidence:
 
 Deferred: the navigation redesign (D5), cost details behind a toggle (D7), and push notifications (D9 phase 2).
 
-## Conclude, don't loop (in review, branch `agent/claude/conclude`, stacked on PR #10)
+## Conclude, don't loop (merged in PR #11)
 
 The first real self-review went around the same scope five times, about $1.80, without a result. The causes were silent fallbacks, every brief having to ask the owner something, unenforced caps, and stale context. Fixes: a verdict on every brief, a 2-round limit, a shared $2 chain budget with caps from notes enforced, an honest list of who can do work, "Nothing was started" reasons, lean follow-ups and context, a facts sheet (`docs/command-center-facts.md`) and **Wrap it up**. Contract: `docs/api/decisions.md`, migration 0013.
 
@@ -52,7 +62,7 @@ Evidence:
 
 **Not yet verified with real models.**
 
-## Project workspace (in review, branch `agent/claude/workspace-projects`, stacked on PR #9)
+## Project workspace (merged in PR #10)
 
 The owner's work now lives in one workspace folder, which is also an Obsidian vault. The folders are organized as families and projects, and the owner's live folders are linked in read-only. Rooms are linked to projects. In a project room:
 
@@ -72,7 +82,7 @@ Evidence:
 
 **Not yet verified with real models or on the owner's PC** (Docker mounts of Windows junction targets).
 
-## Self-serve dashboard (in review, branch `agent/claude/self-serve`)
+## Self-serve dashboard (merged in PR #9)
 
 The owner asked for the Command Center to work without a go-between. So:
 

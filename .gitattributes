@@ -1,0 +1,2 @@
+# The VBScript launcher keeps Windows line endings on every checkout.
+*.vbs text eol=crlf
