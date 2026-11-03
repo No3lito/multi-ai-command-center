@@ -14,7 +14,7 @@ Updated with every merged change. Read this before planning work on the Command 
 - Tests: `backend/tests` (pytest, real PostgreSQL and fake providers), Vitest next to components (`*.test.tsx`), Playwright in `tests/e2e`.
 
 ## Versions (verified, apps/web/package.json and tests/e2e/package.json)
-next 16.4.4 · react 19.3.1 · tailwindcss 4.3.3 · vitest 5.1.0 · @playwright/test 1.63.0. **react-markdown and remark-gfm are not installed.**
+next 16.4.4 · react 19.3.1 · tailwindcss 4.3.3 · vitest 5.1.0 · @playwright/test 1.63.0. react-markdown 10.1.0 and remark-gfm 4.0.1 (exact) render chat messages: no raw HTML, safe links only.
 
 ## Behavior worth knowing (verified)
 - **Senders** are `{principal_id, kind, display_name}` with kind `owner`, `agent`, `external` or `system` (the Coordinator). For agents, the provider is on `/api/agents`, not on messages.
@@ -28,4 +28,5 @@ next 16.4.4 · react 19.3.1 · tailwindcss 4.3.3 · vitest 5.1.0 · @playwright/
 
 ## Status
 - Merged to main: Milestone B, the Grok builder, the Grok Bot bridge, files and briefs, and decision cards (PR #8).
-- In review: PR #9 (self-serve dashboard), PR #10 (project workspace), and the "conclude, don't loop" branch.
+- In review: PR #9 (self-serve dashboard), PR #10 (project workspace), PR #11 (conclude, don't loop) and the dashboard redesign.
+- New rooms include every agent that can answer (Claude and GPT). The "collab" workflow is labeled **Collaborate** on the dashboard.

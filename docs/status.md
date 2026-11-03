@@ -2,6 +2,25 @@
 
 Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
 
+## Dashboard redesign (in review, branch `agent/claude/dashboard-redesign`, stacked on PR #11)
+
+Built from the spec Claude and GPT wrote in the first self-review (D1 to D4, V1 to V4, D6, D8 and D9 phase 1):
+
+- **Sender identity:** a color, avatar and shape for each sender (Claude #E8955A, GPT #34C79A, Grok Bot #A78BFA, Coordinator #8B95A5, owner #4C9AFF), taken from the sender's kind and name and never from message text. Tinted bubbles, owner messages on the right, and member avatars in the room header.
+- **Formatting:** react-markdown 10.1.0 with remark-gfm 4.0.1 (exact versions) renders bold, lists, tables and code. Raw HTML is shown as text, only http, https and mailto links work, images show as text, and long answers fold behind "Show more".
+- **New project in 2 clicks:** **+ New project** opens one form (name, family, optional goal). **Create and start** makes the room and project and starts a Collaborate run. If the run fails, the room is kept and **Retry** starts only the run. New rooms include every agent that can answer (`add_default_agents`, default true). "Plan & review" is renamed **Collaborate** and listed first.
+- **Safe decisions:** every answer opens a confirmation ("what happens, budget"), with **Approve and start · $X** or **Record answer**, and Back. A double click sends once, and card edges are colored by the recommendation.
+- **Polish:** the New goal title shows the room and project, phone text is 16 px, and the tab title shows a count such as "(2) Multi-AI Command Center".
+- **Stale page fixed:** pages are served with `Cache-Control: no-cache`, and hashed `/_next/static` files are cached long-term.
+
+Evidence:
+
+- Backend: 161 passed.
+- Dashboard: 142 passed.
+- Playwright: 8 passed, including the 2-click new project with Claude and GPT colors in the chat, the tab count, and a 390 px phone check (no sideways scroll, 16 px text).
+
+Deferred: the navigation redesign (D5), cost details behind a toggle (D7), and push notifications (D9 phase 2).
+
 ## Conclude, don't loop (in review, branch `agent/claude/conclude`, stacked on PR #10)
 
 The first real self-review went around the same scope five times, about $1.80, without a result. The causes were silent fallbacks, every brief having to ask the owner something, unenforced caps, and stale context. Fixes: a verdict on every brief, a 2-round limit, a shared $2 chain budget with caps from notes enforced, an honest list of who can do work, "Nothing was started" reasons, lean follow-ups and context, a facts sheet (`docs/command-center-facts.md`) and **Wrap it up**. Contract: `docs/api/decisions.md`, migration 0013.

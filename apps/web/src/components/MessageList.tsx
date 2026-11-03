@@ -5,6 +5,9 @@ import { formatCount, formatUsd } from "@/lib/format";
 import { foldRuns } from "@/lib/foldRuns";
 import { isRunActive, type Message, type PrincipalKind, type Run } from "@/lib/types";
 import type { PendingMessage } from "@/lib/useOutbox";
+import { senderStyle, tint } from "@/lib/senderStyle";
+import { Avatar } from "./Avatar";
+import { Folded, Markdown } from "./Markdown";
 import { VerdictPill } from "./VerdictPill";
 
 const NEAR_BOTTOM_PX = 120;
@@ -244,7 +247,7 @@ function RunFold({
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">
             {run ? (FOLD_STATUS[run.status] ?? run.status) : "Earlier run"}
             {run &&
-              ` · ${run.kind === "collab" ? "plan & review" : run.kind === "build" ? "design & build" : "review & improve"}`}
+              ` · ${run.kind === "collab" ? "collaborate" : run.kind === "build" ? "design & build" : "review & improve"}`}
             {run && ` · ${formatUsd(run.spent_usd)}`}
           </p>
           <p className="flex items-center gap-1.5 font-medium" title={title}>
@@ -331,42 +334,58 @@ function ChatRow({ message }: { message: Message }) {
   const simulated = isSimulatedMessage(message);
   const usage = isAgent ? message.usage : null;
   const tokens = usage ? (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) : 0;
+  const style = senderStyle(message.sender);
+  const mine = style.key === "owner";
   return (
     <li
       data-testid="message-item"
       data-message-id={message.id}
       data-seq={message.seq}
       data-sender-kind={message.sender.kind}
+      data-sender-style={style.key}
       data-simulated={simulated || undefined}
       data-correlation-id={message.correlation_id ?? undefined}
       data-reply-to={message.reply_to ?? undefined}
-      className={`group rounded-md px-2 py-1.5 hover:bg-panel ${simulated ? "border-l-2 border-warn" : ""}`}
+      className={`group my-2 flex gap-2 ${mine ? "flex-row-reverse" : ""}`}
     >
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="font-semibold">{message.sender.display_name}</span>
-        <KindBadge kind={message.sender.kind} />
-        {(provider || model) && (
-          <span data-testid="message-model" className="font-mono text-[10px] text-muted">
-            {[provider, model].filter(Boolean).join(" / ")}
+      <Avatar style={style} label={message.sender.display_name} />
+      <div
+        className={`min-w-0 rounded-lg px-3 py-2 ${mine ? "max-w-[85%]" : "max-w-full flex-1"}`}
+        style={{
+          background: tint(style.color, mine ? 0.16 : 0.09),
+          borderLeft: mine ? undefined : `3px solid ${simulated ? "var(--color-warn, #E3B341)" : style.color}`,
+        }}
+      >
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="font-semibold" style={{ color: style.color }}>
+            {message.sender.display_name}
           </span>
+          <KindBadge kind={message.sender.kind} />
+          {(provider || model) && (
+            <span data-testid="message-model" className="font-mono text-[10px] text-muted">
+              {[provider, model].filter(Boolean).join(" / ")}
+            </span>
+          )}
+          {simulated && <SimulatedBadge />}
+          {message.kind !== "chat" && <span className="font-mono text-[10px] text-muted">{message.kind}</span>}
+          <time dateTime={message.created_at} title={t.full} className="text-xs text-muted">
+            {t.short}
+          </time>
+          <span className="ml-auto font-mono text-[10px] text-muted opacity-0 group-hover:opacity-100">
+            #{message.seq}
+          </span>
+        </div>
+        <Folded text={message.body.text}>
+          <Markdown text={message.body.text} />
+        </Folded>
+        {usage && (
+          <p data-testid="message-usage" className="mt-1 font-mono text-[10px] text-muted">
+            {formatCount(usage.input_tokens)} in, {formatCount(usage.output_tokens)} out ({formatCount(tokens)} tokens)
+            {" · "}
+            {simulated ? "no cost (simulated)" : formatUsd(usage.cost_usd)}
+          </p>
         )}
-        {simulated && <SimulatedBadge />}
-        {message.kind !== "chat" && <span className="font-mono text-[10px] text-muted">{message.kind}</span>}
-        <time dateTime={message.created_at} title={t.full} className="text-xs text-muted">
-          {t.short}
-        </time>
-        <span className="ml-auto font-mono text-[10px] text-muted opacity-0 group-hover:opacity-100">
-          #{message.seq}
-        </span>
       </div>
-      <p className="whitespace-pre-wrap break-words">{message.body.text}</p>
-      {usage && (
-        <p data-testid="message-usage" className="mt-0.5 font-mono text-[10px] text-muted">
-          {formatCount(usage.input_tokens)} in, {formatCount(usage.output_tokens)} out ({formatCount(tokens)} tokens)
-          {" · "}
-          {simulated ? "no cost (simulated)" : formatUsd(usage.cost_usd)}
-        </p>
-      )}
     </li>
   );
 }

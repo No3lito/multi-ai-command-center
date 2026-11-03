@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Decision } from "@/lib/types";
 import { run } from "@/test/fixtures";
-import { DecisionsPanel, bottomLine, describePlan } from "./DecisionsPanel";
+import { DecisionsPanel, bottomLine, confirmLabel, describePlan, whatHappens } from "./DecisionsPanel";
 
 function decision(over: Partial<Decision> = {}): Decision {
   return {
@@ -92,7 +92,7 @@ describe("decision cards", () => {
     expect(screen.queryByTestId("decision-item")).not.toBeInTheDocument();
   });
 
-  it("approves with a note and budget in one click", async () => {
+  it("approves with a note and budget after a confirm step", async () => {
     const user = userEvent.setup();
     const onAnswer = vi.fn().mockResolvedValue({});
     render(<DecisionsPanel runs={[briefed]} decisions={[decision()]} onAnswer={onAnswer} />);
@@ -100,6 +100,7 @@ describe("decision cards", () => {
     await user.type(screen.getByTestId("decision-note"), "cap 50k credits");
     await user.type(screen.getByTestId("decision-budget"), "0.4");
     await user.click(screen.getByTestId("decision-approve"));
+    await user.click(screen.getByTestId("decision-confirm"));
     expect(onAnswer).toHaveBeenCalledWith(`dec_${"a".repeat(32)}`, {
       answer: "approve",
       note: "cap 50k credits",
@@ -115,6 +116,7 @@ describe("decision cards", () => {
     await user.type(screen.getByTestId("decision-budget"), "9");
     expect(screen.getByTestId("decision-approve")).toBeDisabled();
     await user.click(screen.getByTestId("decision-decline"));
+    await user.click(screen.getByTestId("decision-confirm"));
     expect(onAnswer).toHaveBeenCalledWith(`dec_${"a".repeat(32)}`, { answer: "decline" });
   });
 
@@ -125,6 +127,7 @@ describe("decision cards", () => {
       .mockRejectedValue({ status: 409, code: "x", message: "This decision was already approved" });
     render(<DecisionsPanel runs={[briefed]} decisions={[decision()]} onAnswer={onAnswer} />);
     await user.click(screen.getByTestId("decision-more-info"));
+    await user.click(screen.getByTestId("decision-confirm"));
     expect(await screen.findByText(/already approved|Could not save/)).toBeInTheDocument();
   });
 
@@ -161,12 +164,13 @@ describe("self-explaining cards", () => {
     );
   });
 
-  it("follows the recommendation with the (edited) note in one click", async () => {
+  it("follows the recommendation with the (edited) note after a confirm step", async () => {
     const user = userEvent.setup();
     const onAnswer = vi.fn().mockResolvedValue({});
     render(<DecisionsPanel runs={[briefed]} decisions={[explained]} onAnswer={onAnswer} />);
     await user.type(screen.getByTestId("decision-note"), " Cap 25k.");
     await user.click(screen.getByTestId("decision-follow"));
+    await user.click(screen.getByTestId("decision-confirm"));
     expect(onAnswer).toHaveBeenCalledWith(explained.id, {
       answer: "more_info",
       note: "Run the zero-credit replay test first. Cap 25k.",
@@ -176,5 +180,35 @@ describe("self-explaining cards", () => {
   it("has no follow button when the agents gave no clear recommendation", () => {
     render(<DecisionsPanel runs={[briefed]} decisions={[decision({ recommended: null })]} onAnswer={vi.fn()} />);
     expect(screen.queryByTestId("decision-follow")).not.toBeInTheDocument();
+  });
+});
+
+describe("confirm before answering", () => {
+  it("says what will happen and its budget before anything is sent, and Back cancels", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn().mockResolvedValue({});
+    render(
+      <DecisionsPanel runs={[run({ brief: "**Bottom line:** x" })]} decisions={[decision()]} onAnswer={onAnswer} />,
+    );
+    await user.click(screen.getByTestId("decision-add-note"));
+    await user.type(screen.getByTestId("decision-budget"), "0.4");
+    await user.click(screen.getByTestId("decision-approve"));
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(screen.getByTestId("decision-what-happens")).toHaveTextContent("Starts Grok Bot does the work");
+    expect(screen.getByTestId("decision-what-happens")).toHaveTextContent("Budget: $0.40");
+    expect(screen.getByTestId("decision-confirm")).toHaveTextContent("Approve and start · $0.40");
+    await user.click(screen.getByTestId("decision-confirm-back"));
+    expect(screen.queryByTestId("decision-confirm-box")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("decision-decline"));
+    expect(screen.getByTestId("decision-confirm")).toHaveTextContent("Record answer");
+    await user.dblClick(screen.getByTestId("decision-confirm"));
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it("is honest when approving would start nothing", () => {
+    const blocked = decision({ cannot_run_reason: "Nobody connected can do this." });
+    expect(whatHappens(blocked, "approve", undefined)).toBe("Nothing starts: Nobody connected can do this.");
+    expect(confirmLabel(blocked, "approve", undefined)).toBe("Record answer");
+    expect(confirmLabel(decision(), "more_info", undefined)).toBe("Ask and start");
   });
 });

@@ -260,9 +260,9 @@ export function CollabForm({
             }}
             className={fieldClass}
           >
+            <option value="collab">Collaborate: Claude and GPT work it out together</option>
             <option value="review">Review &amp; improve: an agent&apos;s work, reviewed by two</option>
             <option value="build">Design &amp; build: two designers, one builder</option>
-            <option value="collab">Plan &amp; review: planner and critic</option>
           </select>
         </div>
         <div className="grid grid-cols-2 gap-2">

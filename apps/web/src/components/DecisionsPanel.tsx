@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { isApiError } from "@/lib/api";
 import type { Decision, DecisionAnswer, DecisionAnswerBody, FollowUpPlan, Run } from "@/lib/types";
 import { PanelSection } from "./PanelSection";
@@ -67,6 +67,9 @@ function DecisionCard({
   const follow = decision.recommended ?? null;
   const [budget, setBudget] = useState("");
   const [busy, setBusy] = useState<DecisionAnswer | null>(null);
+  // Every answer is confirmed first: what it does and its budget, before anything starts.
+  const [confirming, setConfirming] = useState<DecisionAnswer | null>(null);
+  const sending = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const budgetNum = budget.trim() ? Number(budget) : undefined;
@@ -74,7 +77,8 @@ function DecisionCard({
 
   const send = async (answer: DecisionAnswer) => {
     const startsRun = answer === "approve" || answer === "more_info";
-    if (!onAnswer || (startsRun && budgetBad)) return;
+    if (!onAnswer || (startsRun && budgetBad) || sending.current) return;
+    sending.current = true; // a double click sends once
     setBusy(answer);
     setError(null);
     try {
@@ -86,13 +90,20 @@ function DecisionCard({
     } catch (e: unknown) {
       setError(isApiError(e) ? e.message : "Could not save your answer.");
     } finally {
+      sending.current = false;
       setBusy(null);
+      setConfirming(null);
     }
   };
 
   const btn = "rounded-md px-2 py-1 text-[11px] font-medium disabled:opacity-50";
   return (
-    <li data-testid="decision-card" className="rounded-md border border-line bg-bg p-2 text-xs">
+    <li
+      data-testid="decision-card"
+      data-recommended={decision.recommended ?? undefined}
+      className="rounded-md border border-line bg-bg p-2 text-xs"
+      style={{ borderLeft: `4px solid ${EDGE[decision.recommended ?? "none"]}` }}
+    >
       <p className="font-medium text-fg">
         {decision.final_round && (
           <span
@@ -170,7 +181,7 @@ function DecisionCard({
           data-testid="decision-follow"
           className={`${btn} mt-2 w-full bg-accent py-1.5 text-white`}
           disabled={!!busy || !onAnswer || (follow !== "decline" && budgetBad)}
-          onClick={() => void send(follow)}
+          onClick={() => setConfirming(follow)}
           title={note.trim() ? "Sends the note above with your answer" : undefined}
         >
           {busy === follow ? "Saving…" : `Do what they recommend: ${FOLLOW_LABEL[follow]}`}
@@ -183,7 +194,7 @@ function DecisionCard({
           data-testid="decision-approve"
           className={`${btn} ${follow ? "border border-line" : "bg-accent text-white"}`}
           disabled={!!busy || !onAnswer || budgetBad}
-          onClick={() => void send("approve")}
+          onClick={() => setConfirming("approve")}
         >
           {busy === "approve" ? "Starting…" : "Approve"}
         </button>
@@ -192,7 +203,7 @@ function DecisionCard({
           data-testid="decision-more-info"
           className={`${btn} border border-line`}
           disabled={!!busy || !onAnswer || budgetBad}
-          onClick={() => void send("more_info")}
+          onClick={() => setConfirming("more_info")}
         >
           Need more info
         </button>
@@ -201,7 +212,7 @@ function DecisionCard({
           data-testid="decision-decline"
           className={`${btn} border border-line text-danger`}
           disabled={!!busy || !onAnswer}
-          onClick={() => void send("decline")}
+          onClick={() => setConfirming("decline")}
         >
           Decline
         </button>
@@ -210,15 +221,77 @@ function DecisionCard({
           data-testid="decision-dismiss"
           className="ml-auto text-[10px] text-muted underline disabled:opacity-50"
           disabled={!!busy || !onAnswer}
-          onClick={() => void send("dismiss")}
+          onClick={() => setConfirming("dismiss")}
           title="No longer relevant; nothing runs"
         >
           Dismiss
         </button>
       </div>
+      {confirming && (
+        <div data-testid="decision-confirm-box" className="mt-2 rounded-md border border-accent bg-accent-soft p-2">
+          <p className="text-[11px] font-semibold text-fg">
+            Your answer: {FOLLOW_LABEL[confirming]}
+            {note.trim() ? " (with the note above)" : ""}
+          </p>
+          <p className="mt-0.5 text-[11px] text-fg" data-testid="decision-what-happens">
+            {whatHappens(decision, confirming, budgetNum)}
+          </p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <button
+              type="button"
+              data-testid="decision-confirm"
+              className={`${btn} bg-accent text-white`}
+              disabled={!!busy}
+              onClick={() => void send(confirming)}
+            >
+              {busy ? "Saving…" : confirmLabel(decision, confirming, budgetNum)}
+            </button>
+            <button
+              type="button"
+              data-testid="decision-confirm-back"
+              className="text-[11px] text-muted underline"
+              disabled={!!busy}
+              onClick={() => setConfirming(null)}
+            >
+              Back
+            </button>
+          </div>
+        </div>
+      )}
       {error && <p className="mt-1 text-[11px] text-danger">{error}</p>}
     </li>
   );
+}
+
+const EDGE: Record<string, string> = {
+  approve: "#34C79A",
+  more_info: "#E3B341",
+  decline: "#F0616D",
+  none: "transparent",
+};
+
+function startsRun(d: Decision, answer: DecisionAnswer): boolean {
+  if (answer === "decline" || answer === "dismiss") return false;
+  if (answer === "approve" && d.cannot_run_reason) return false;
+  const plan = answer === "approve" ? d.on_approve : d.on_more_info;
+  return plan.workflow !== "none";
+}
+
+/** Plain words for what an answer will do, shown before it is sent. */
+export function whatHappens(d: Decision, answer: DecisionAnswer, budget: number | undefined): string {
+  if (answer === "decline") return "Nothing runs. Your answer and note are recorded and shared with the agents.";
+  if (answer === "dismiss") return "Nothing runs. The card is closed as no longer relevant.";
+  if (answer === "approve" && d.cannot_run_reason) return `Nothing starts: ${d.cannot_run_reason}`;
+  if (!startsRun(d, answer)) return "Nothing more runs. Your answer is recorded and shared with the agents.";
+  const plan = answer === "approve" ? d.on_approve : d.on_more_info;
+  const money = budget !== undefined ? `$${budget.toFixed(2)}` : "the default (within the topic's $2 limit)";
+  return `${answer === "approve" ? "Starts" : "Starts, to get the missing facts:"} ${describePlan(plan)} Budget: ${money}.`;
+}
+
+export function confirmLabel(d: Decision, answer: DecisionAnswer, budget: number | undefined): string {
+  if (!startsRun(d, answer)) return "Record answer";
+  const verb = answer === "approve" ? "Approve and start" : "Ask and start";
+  return budget !== undefined ? `${verb} · $${budget.toFixed(2)}` : verb;
 }
 
 /** The latest conclusion and the decisions waiting on the owner. Past briefs live in History. */

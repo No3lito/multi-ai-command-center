@@ -227,6 +227,14 @@ async def test_project_rooms_read_pick_and_save(
                 assert bad.status_code == 422
                 room = (await c.post("/api/rooms", json={"name": "Meme", "project_path": MEME})).json()
                 assert room["project_path"] == MEME
+                # New rooms come ready: Claude and GPT join; Grok (no xAI key) does not.
+                assert room["member_count"] == 3
+                names = {
+                    m["display_name"] for m in (await c.get(f"/api/rooms/{room['id']}")).json()["members"]
+                }
+                assert {"Claude", "GPT"} <= names and "Grok" not in names
+                bare = await c.post("/api/rooms", json={"name": "Bare", "add_default_agents": False})
+                assert bare.json()["member_count"] == 1
                 fresh = await c.post(
                     "/api/rooms",
                     json={"name": "Fantasy", "new_project": {"family": "Fun", "name": "Draft Helper"}},
@@ -330,3 +338,20 @@ async def test_project_rooms_read_pick_and_save(
                     assert "author: Grok Bot" in (root / saved_out["path"]).read_text()
                     with pytest.raises(RuntimeError):
                         await call(client, "get_project", room_id=general)  # not a member / not linked
+
+
+async def test_pages_revalidate_and_hashed_assets_cache(fresh_database_url: str, tmp_path: Path) -> None:
+    import httpx
+
+    web = tmp_path / "no-web-build"
+    (web / "_next/static/chunks").mkdir(parents=True)
+    (web / "index.html").write_text("<!doctype html><title>CC</title>")
+    (web / "_next/static/chunks/app-abc123.js").write_text("console.log(1)")
+    with run_server(fresh_database_url, tmp_path, PROVIDER_MODE="simulated") as srv:
+        async with httpx.AsyncClient(base_url=srv.base_url) as c:
+            page = await c.get("/")
+            asset = await c.get("/_next/static/chunks/app-abc123.js")
+            api = await c.get("/api/health")
+    assert page.status_code == 200 and page.headers["cache-control"] == "no-cache"
+    assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert api.headers["cache-control"] == "no-store"

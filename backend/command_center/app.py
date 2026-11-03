@@ -48,7 +48,7 @@ from command_center.protocol import (
     RoomDetailOut,
     RoomOut,
 )
-from command_center.providers.model_port import ModelPort
+from command_center.providers.model_port import ModelPort, agent_status
 from command_center.workspace import is_project_workspace, open_workspace
 
 log = logging.getLogger(__name__)
@@ -321,8 +321,15 @@ def create_app(config: Settings | None = None) -> FastAPI:
             response.headers.setdefault("Referrer-Policy", "no-referrer")
             response.headers.setdefault("X-Frame-Options", "DENY")
             response.headers.setdefault("Content-Security-Policy", csp)
-            if request.url.path.startswith("/api/"):
+            path = request.url.path
+            if path.startswith("/api/"):
                 response.headers.setdefault("Cache-Control", "no-store")
+            elif path.startswith("/_next/static/"):
+                # File names carry a content hash: a new build gets new names, so cache for good.
+                response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+            else:
+                # Pages: always check for a newer build, so an update shows without Ctrl + Shift + R.
+                response.headers.setdefault("Cache-Control", "no-cache")
             return response
 
     app.add_middleware(SecurityMiddleware)
@@ -500,15 +507,38 @@ def create_app(config: Settings | None = None) -> FastAPI:
             raise ApiError(409, "room_exists", "A room with that name already exists") from exc
         if project_path:
             room.project_path = project_path
-            await session.commit()
+        added: list[str] = []
+        if body.add_default_agents:
+            # New rooms come ready to work: every enabled model agent that can answer right now
+            # (live or simulated) joins. Adding members costs nothing.
+            rows = (
+                await session.execute(
+                    select(models.Principal, models.AgentProfile)
+                    .join(models.AgentProfile, models.AgentProfile.principal_id == models.Principal.id)
+                    .where(models.Principal.kind == "agent", models.Principal.status == "active")
+                    .order_by(models.Principal.display_name)
+                )
+            ).all()
+            for p, profile in rows:
+                if agent_status(settings, profile) in ("live", "simulated"):
+                    session.add(models.RoomMember(room_id=room.id, principal_id=p.id))
+                    added.append(p.display_name)
+        await session.commit()
         await audit(
-            session, "room.create", principal.id, room.id, request, name=room.name, project=project_path
+            session,
+            "room.create",
+            principal.id,
+            room.id,
+            request,
+            name=room.name,
+            project=project_path,
+            agents=added,
         )
         return RoomOut(
             id=room.id,
             name=room.name,
             created_at=room.created_at,
-            member_count=1,
+            member_count=1 + len(added),
             last_seq=0,
             project_path=project_path,
         )
