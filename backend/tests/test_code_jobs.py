@@ -282,6 +282,7 @@ async def test_write_test_review_fix_then_one_card_for_the_owner(world: dict[str
         card = await s.scalar(select(models.Decision).where(models.Decision.run_id == run.id))
     assert card is not None and card.recommended == "approve"
     assert card.follow_up["code_pr"]["number"] == 1 and card.follow_up["on_more_info"]["workflow"] == "code"
+    assert [o["label"] for o in card.options or []] == ["Merge it", "Send it back to fix", "Close it"]
 
 
 async def test_blocked_edits_are_not_committed_and_go_back_to_the_writer(world: dict[str, Any]) -> None:  # noqa: F811
@@ -539,6 +540,7 @@ async def test_no_ci_means_unverified_and_skip_ci_is_stripped(
         card = await s.scalar(select(models.Decision).where(models.Decision.run_id == run.id))
     assert card is not None and card.recommended != "approve"
     assert "not verified" in (card.why or "")
+    assert [o["answer"] for o in card.options or []] == ["more_info", "decline"]  # no merge without tests
 
 
 async def test_edits_failing_in_the_last_round_still_end_with_a_card(world: dict[str, Any]) -> None:  # noqa: F811

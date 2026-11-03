@@ -406,3 +406,24 @@ async def test_workflow_steps_read_their_own_run_not_other_runs(world: dict[str,
     text = lean.messages[0].content
     assert "owner says hi" in text and "MY RUN TEXT" in text and "OTHER RUN TEXT" not in text
     assert "OTHER RUN TEXT" in full.messages[0].content, "reply runs still see the whole room"
+
+
+def test_ready_made_options_are_parsed_and_bad_ones_dropped() -> None:
+    brief = (
+        "**Verdict:** Needs you.\n```decisions\n"
+        '[{"question": "Run the backtest?", "recommended": "approve", "options": ['
+        '{"label": "Yes, all 37", "detail": "About $0.40", "answer": "approve", "note": "Paper only."},'
+        '{"label": "Top 10 only", "detail": "About $0.15", "answer": "approve",'
+        ' "note": "Top 10, under $0.20."},'
+        '{"label": "", "answer": "approve"},'
+        '{"label": "Maybe", "answer": "perhaps"},'
+        '{"label": "Not now", "answer": "decline"},'
+        '{"label": "Tell me more", "answer": "more_info"},'
+        '{"label": "Fifth good one", "answer": "decline"}]}]\n```'
+    )
+    _, drafts = decisions.split_brief(brief)
+    assert len(drafts) == 1
+    labels = [o.label for o in drafts[0].options]
+    # Bad ones dropped, at most four kept.
+    assert labels == ["Yes, all 37", "Top 10 only", "Not now", "Tell me more"]
+    assert drafts[0].options[1].note == "Top 10, under $0.20."

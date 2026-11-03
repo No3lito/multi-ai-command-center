@@ -244,7 +244,7 @@ export function NewRoomForm({ onCreated, onDone }: { onCreated: (room: Room) => 
           type="submit"
           data-testid="new-room-start"
           disabled={busy || !goal.trim()}
-          className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg hover:opacity-90 disabled:opacity-50"
         >
           {busy ? "Working…" : pendingRoom ? "Retry starting the run" : "Create and start"}
         </button>

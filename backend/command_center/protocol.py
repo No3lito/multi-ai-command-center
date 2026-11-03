@@ -258,6 +258,13 @@ class InboxFileIn(Strict):
     project_path: str = Field(min_length=1, max_length=300)
 
 
+class DecisionOptionOut(Strict):
+    label: str
+    detail: str = ""
+    answer: Literal["approve", "decline", "more_info"]
+    note: str = ""
+
+
 class CodePrOut(Strict):
     number: int
     url: str
@@ -289,6 +296,8 @@ class DecisionOut(Strict):
     recommended: Literal["approve", "decline", "more_info"] | None = None
     why: str | None = None
     suggested_note: str | None = None
+    # Ready-made answers the owner can pick instead of writing a note (best first).
+    options: list[DecisionOptionOut] = Field(default_factory=list)
     cost: str | None
     on_approve: FollowUpPlanOut
     on_more_info: FollowUpPlanOut

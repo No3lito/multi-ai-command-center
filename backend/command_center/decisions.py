@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,6 +63,15 @@ def infer_answer(recommendation: str | None) -> Answer | None:
     return None
 
 
+class DecisionOption(BaseModel):
+    """One ready-made answer: the owner clicks it instead of writing a note."""
+
+    label: str = Field(min_length=1, max_length=80)
+    detail: str = Field(default="", max_length=300)
+    answer: Answer
+    note: str = Field(default="", max_length=1000)
+
+
 class DecisionDraft(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     recommendation: str | None = Field(default=None, max_length=2000)
@@ -72,6 +81,19 @@ class DecisionDraft(BaseModel):
     cost: str | None = Field(default=None, max_length=500)
     on_approve: OnApprove = Field(default_factory=OnApprove)
     on_more_info: OnMoreInfo = Field(default_factory=OnMoreInfo)
+    options: list[DecisionOption] = Field(default_factory=list)
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def _keep_valid_options(cls, raw: Any) -> list[Any]:
+        """A malformed option is dropped, never the whole decision; at most four are kept."""
+        good: list[Any] = []
+        for item in raw if isinstance(raw, list) else []:
+            try:
+                good.append(DecisionOption.model_validate(item))
+            except ValidationError:
+                continue
+        return good[:4]
 
     def model_post_init(self, _context: Any) -> None:
         if self.recommended is None:
@@ -126,7 +148,12 @@ def instruction_suffix(executors: list[str], attachments: list[str], *, final_ro
         'known, else "unknown"), "on_approve" (what runs if the owner approves: {"workflow": '
         '"review" | "build" | "collab" | "code" | "none", "worker": name or null, "goal": the full '
         'goal for that run, "attachments": file paths}), and "on_more_info" (what runs to get '
-        'the missing facts: {"workflow", "worker", "goal"}).\n'
+        'the missing facts: {"workflow", "worker", "goal"}), and "options": two to four ready-made '
+        "answers the owner can click instead of writing a note, best first, each "
+        '{"label": a few plain words such as "Yes, top 10 only", "detail": what happens and what it '
+        'costs, in one short sentence, "answer": "approve", "decline" or "more_info", "note": the '
+        "instruction the agents receive with that answer, including any cap}. Make the options "
+        "real alternatives (for example the full plan, a smaller or cheaper version, and not now).\n"
         f"Who can actually do work in this room, and what each can and cannot do:\n{who}\n"
         'Only name a worker from that list, and only for work it can do. Use "collab" only when '
         "another discussion between the reviewers would produce something new (not another plan "
@@ -184,6 +211,7 @@ async def store(session: AsyncSession, run: models.Run, drafts: list[DecisionDra
             suggested_note=d.suggested_note,
             cost=d.cost,
             follow_up={"on_approve": d.on_approve.model_dump(), "on_more_info": d.on_more_info.model_dump()},
+            options=[o.model_dump() for o in d.options] or None,
             status="pending",
         )
         for i, d in enumerate(drafts)

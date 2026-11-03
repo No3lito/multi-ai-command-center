@@ -23,6 +23,7 @@ import { SummaryPanel, lastSeenFor } from "./SummaryPanel";
 import { CollabForm } from "./CollabForm";
 import { Composer, composerDeliveryState, type MentionAgent } from "./Composer";
 import { ConnectionPill } from "./ConnectionPill";
+import { ThemeToggle } from "./ThemeToggle";
 import { MessageList } from "./MessageList";
 import { RightPanel } from "./RightPanel";
 import { RunsPanel } from "./RunsPanel";
@@ -174,10 +175,10 @@ export function RoomView(props: Props) {
   const roomName = detail.kind === "ready" ? detail.detail.name : (roomSummary?.name ?? "");
   const memberCount = detail.kind === "ready" ? detail.detail.member_count : roomSummary?.member_count;
 
-  const participantStyles = useSpeakerStyles([
-    ...(roomDetail?.members ?? []),
-    ...stream.messages.map((message) => message.sender),
-  ], outbox.pending.length > 0);
+  const participantStyles = useSpeakerStyles(
+    [...(roomDetail?.members ?? []), ...stream.messages.map((message) => message.sender)],
+    outbox.pending.length > 0,
+  );
   const header = (
     <header className="room-header sticky top-0 z-20 flex min-h-16 shrink-0 flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2">
       <button
@@ -217,12 +218,13 @@ export function RoomView(props: Props) {
           <h1 className="font-semibold text-muted">No room selected</h1>
         )}
       </div>
+      <ThemeToggle />
       {roomId && !notFound && detail.kind === "ready" && (
         <button
           type="button"
           data-testid="new-goal"
           onClick={() => setGoalOpen(true)}
-          className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90"
+          className="min-h-9 shrink-0 rounded-md bg-accent px-3.5 text-sm font-semibold text-accent-fg hover:opacity-90"
         >
           New goal
         </button>
@@ -312,11 +314,7 @@ export function RoomView(props: Props) {
           <ul aria-label="Participants" data-testid="room-members" className="participant-strip">
             {roomDetail.members.map((member) => (
               <li key={member.id} className="flex shrink-0 items-center gap-2">
-                <Avatar
-                  style={participantStyles.get(speakerId(member))!}
-                  label={member.display_name}
-                  size={24}
-                />
+                <Avatar style={participantStyles.get(speakerId(member))!} label={member.display_name} size={24} />
                 <span>{member.display_name}</span>
               </li>
             ))}
@@ -342,19 +340,18 @@ export function RoomView(props: Props) {
             }}
           />
         )}
-        {roomDetail && !notFound && roomId &&
-          (runs.runs.length > 0 || decisions.decisions.length > 0) && (
-            <details open className="task-progress">
-              <summary>Tasks and progress</summary>
-              <SummaryPanel
-                runs={runs.runs}
-                decisions={decisions.decisions}
-                usage={usage.usage}
-                since={lastSeenFor(roomId)}
-                agentName={agentName}
-              />
-            </details>
-          )}
+        {roomDetail && !notFound && roomId && (runs.runs.length > 0 || decisions.decisions.length > 0) && (
+          <details open className="task-progress">
+            <summary>Tasks and progress</summary>
+            <SummaryPanel
+              runs={runs.runs}
+              decisions={decisions.decisions}
+              usage={usage.usage}
+              since={lastSeenFor(roomId)}
+              agentName={agentName}
+            />
+          </details>
+        )}
         {roomDetail && !notFound && roomId && tab === "decide" && (
           <div role="tabpanel" id="tabpanel-decide" aria-labelledby="tab-decide">
             <DecisionsPanel runs={runs.runs} decisions={decisions.decisions} onAnswer={onAnswer} />

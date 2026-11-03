@@ -67,7 +67,7 @@ function InboxRow({
           data-testid="inbox-file"
           disabled={busy || !target}
           onClick={() => void file()}
-          className="shrink-0 rounded-md bg-accent px-2 py-1 text-[11px] font-medium text-white disabled:opacity-50"
+          className="shrink-0 rounded-md bg-accent px-2 py-1 text-[11px] font-medium text-accent-fg disabled:opacity-50"
         >
           {busy ? "Filing…" : "File it"}
         </button>

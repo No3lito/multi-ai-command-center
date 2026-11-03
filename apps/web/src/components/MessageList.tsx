@@ -65,7 +65,17 @@ interface Props {
   speakerStyles?: ReadonlyMap<string, SenderStyle>;
 }
 
-export function MessageList({ messages, pending, loading, onRetry, onDiscard, runs, onArchive, participants = [], speakerStyles }: Props) {
+export function MessageList({
+  messages,
+  pending,
+  loading,
+  onRetry,
+  onDiscard,
+  runs,
+  onArchive,
+  participants = [],
+  speakerStyles,
+}: Props) {
   const senders = [...participants, ...messages.map((message) => message.sender)];
   const localStyles = useSpeakerStyles(senders, pending.length > 0);
   const styles = speakerStyles ?? localStyles;
@@ -203,8 +213,8 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard, ru
 function systemLabel(message: Message): string | null {
   if (message.kind === "error") return "Error";
   if (message.kind === "task.assign") return "Assignment";
-  if (/approv|decision|permission/.test(message.kind) ||
-      message.body.data?.requires_approval === true) return "Approval";
+  if (/approv|decision|permission/.test(message.kind) || message.body.data?.requires_approval === true)
+    return "Approval";
   return null;
 }
 
@@ -313,10 +323,12 @@ function RunFold({
               style={styles.get(speakerId(m.sender))!}
               grouped={(() => {
                 const previous = messages[index - 1];
-                return previous !== undefined &&
+                return (
+                  previous !== undefined &&
                   m.sender.kind !== "system" &&
                   previous.sender.kind !== "system" &&
-                  speakerId(previous.sender) === speakerId(m.sender);
+                  speakerId(previous.sender) === speakerId(m.sender)
+                );
               })()}
             />
           ))}
@@ -336,11 +348,7 @@ export function isSimulatedMessage(message: Message): boolean {
   return message.body.data?.simulated === true;
 }
 
-function MessageRow({ message, grouped = false, style }: {
-  message: Message;
-  grouped?: boolean;
-  style: SenderStyle;
-}) {
+function MessageRow({ message, grouped = false, style }: { message: Message; grouped?: boolean; style: SenderStyle }) {
   if (message.sender.kind === "system") return <SystemNote message={message} />;
   return <ChatRow message={message} grouped={grouped} style={style} />;
 }
@@ -384,36 +392,28 @@ function ChatRow({ message, grouped, style }: { message: Message; grouped: boole
     >
       <div className="min-w-0">
         {!grouped && (
-          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1">
             <Avatar style={style} label={message.sender.display_name} />
-            <span className="inline-flex items-center gap-2 font-semibold text-fg">
-              <span
-                aria-hidden="true"
-                data-testid="agent-dot"
-                className="h-2 w-2 shrink-0 rounded-full"
-                style={{ background: style.color }}
-              />
-              {message.sender.display_name}
+            <span data-testid="sender-name" className="font-semibold" style={{ color: style.color }}>
+              {mine ? "You" : message.sender.display_name}
             </span>
-            <span className="speaker-role">{mine ? "You" : isAgent ? "AI" : "System"}</span>
-            <KindBadge kind={message.sender.kind} />
+            {!isAgent && !mine && <KindBadge kind={message.sender.kind} />}
+            {simulated && <SimulatedBadge />}
+            {message.kind !== "chat" && <span className="font-mono text-[10px] text-muted">{message.kind}</span>}
+            <time dateTime={message.created_at} title={t.full} className="text-xs text-muted">
+              {t.short}
+            </time>
+            {(provider || model) && (
+              <span
+                data-testid="message-model"
+                title={`Message #${message.seq}`}
+                className="ml-auto font-mono text-[10px] text-muted opacity-70 group-hover:opacity-100"
+              >
+                {[provider, model].filter(Boolean).join(" / ")}
+              </span>
+            )}
           </div>
         )}
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          {(provider || model) && (
-            <span data-testid="message-model" className="font-mono text-[10px] text-muted">
-              {[provider, model].filter(Boolean).join(" / ")}
-            </span>
-          )}
-          {simulated && <SimulatedBadge />}
-          {message.kind !== "chat" && <span className="font-mono text-[10px] text-muted">{message.kind}</span>}
-          <time dateTime={message.created_at} title={t.full} className="text-xs text-muted">
-            {t.short}
-          </time>
-          <span className="ml-auto font-mono text-[10px] text-muted">
-            #{message.seq}
-          </span>
-        </div>
         <Folded text={message.body.text}>
           <Markdown text={message.body.text} />
         </Folded>
@@ -450,9 +450,7 @@ function SystemNote({ message }: { message: Message }) {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className="font-semibold">{message.sender.display_name}</span>
-          <span className="speaker-role">System</span>
-          {label && <strong>{label}</strong>}
-          <span className="font-mono text-[13px]">{message.kind}</span>
+          {isError && label && <strong>{label}</strong>}
           <time dateTime={message.created_at} title={t.full} className="text-[13px]">
             {t.short}
           </time>

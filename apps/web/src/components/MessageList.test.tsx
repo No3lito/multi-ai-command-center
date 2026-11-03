@@ -14,7 +14,7 @@ describe("MessageList", () => {
     const p = item.querySelector("p");
     expect(p?.textContent).toBe('<img src=x onerror="alert(1)">\nsecond line');
     expect(p?.className).toMatch(/whitespace-pre/);
-    expect(screen.getByText("owner")).toBeInTheDocument();
+    expect(screen.getByTestId("sender-name")).toHaveTextContent("You");
   });
 
   it("groups the same identity without grouping different ids with the same name", () => {
@@ -47,7 +47,8 @@ describe("MessageList", () => {
     render(<MessageList messages={messages} pending={[]} loading={false} onRetry={() => {}} onDiscard={() => {}} />);
     const rows = screen.getAllByTestId("message-item");
     expect(rows.map((row) => row.getAttribute("data-system-tier"))).toEqual(["routine", "action", "action"]);
-    expect(screen.getByText("Assignment")).toBeInTheDocument();
+    // Look A1: steps stay one quiet line; only errors carry a label.
+    expect(screen.queryByText("Assignment")).toBeNull();
     expect(screen.getByText("Error")).toBeInTheDocument();
   });
 
@@ -69,11 +70,11 @@ describe("MessageList", () => {
     );
     const rows = screen.getAllByTestId("message-item");
     speakers.forEach((speaker, index) => {
-      expect(within(rows[index]!).getByText(speaker.display_name)).toBeVisible();
-      expect(rows[index]!.querySelector(".speaker-role")).toHaveTextContent(
-        speaker.kind === "owner" ? "You" : speaker.kind === "agent" ? "AI" : "System",
-      );
-      expect(rows[index]!.querySelector(".speaker-role")).toBeVisible();
+      // The owner's own messages say "You"; everyone else is named, with an initial avatar.
+      const name = speaker.kind === "owner" ? "You" : speaker.display_name;
+      expect(within(rows[index]!).getByTestId("sender-name")).toHaveTextContent(name);
+      expect(within(rows[index]!).getByTestId("sender-name")).toBeVisible();
+      expect(within(rows[index]!).getByTestId("avatar")).toHaveAttribute("aria-label", speaker.display_name);
     });
   });
 
@@ -151,7 +152,6 @@ describe("MessageList", () => {
     expect(rows[0]).not.toHaveAttribute("data-grouped");
     expect(rows[1]).toHaveAttribute("data-grouped", "true");
     expect(screen.getAllByText("Claude")).toHaveLength(1);
-    expect(rows[1]).toHaveTextContent("#2");
   });
 
   it("keeps plain coordinator chat visible in the routine tier and breaks grouping", () => {

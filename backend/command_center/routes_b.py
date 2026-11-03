@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Query, Request
+from pydantic import ValidationError
 from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +33,7 @@ from command_center.protocol import (
     ConnectionRoom,
     DecisionAnswerIn,
     DecisionAnswerOut,
+    DecisionOptionOut,
     DecisionOut,
     FileEntryOut,
     FilesOut,
@@ -223,6 +225,7 @@ def decision_out(d: models.Decision, run_goal: str) -> DecisionOut:
         recommended=d.recommended,
         why=d.why,
         suggested_note=d.suggested_note,
+        options=_options(d.options),
         cost=d.cost,
         on_approve=_plan(follow.get("on_approve")),
         on_more_info=_plan(more),
@@ -233,6 +236,16 @@ def decision_out(d: models.Decision, run_goal: str) -> DecisionOut:
         created_at=d.created_at,
         code_pr=_code_pr(follow.get("code_pr")),
     )
+
+
+def _options(raw: object) -> list[DecisionOptionOut]:
+    out: list[DecisionOptionOut] = []
+    for item in raw if isinstance(raw, list) else []:
+        try:
+            out.append(DecisionOptionOut.model_validate(item))
+        except ValidationError:
+            continue  # a malformed stored option is skipped, never fatal
+    return out[:4]
 
 
 def _code_pr(raw: object) -> CodePrOut | None:

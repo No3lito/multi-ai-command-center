@@ -204,7 +204,7 @@ function RunItem({
             onClick={() => void tryAgain()}
             disabled={busy}
             title="Start this code job again with the same goal and agreed spec"
-            className="ml-auto rounded bg-accent px-1.5 py-px text-[11px] font-medium text-white disabled:opacity-50"
+            className="ml-auto rounded bg-accent px-1.5 py-px text-[11px] font-medium text-accent-fg disabled:opacity-50"
           >
             {busy ? "Starting" : "Try again"}
           </button>
@@ -216,7 +216,7 @@ function RunItem({
             onClick={() => void wrapUp()}
             disabled={busy || run.wrap_up}
             title="Stop discussing and write the conclusion now"
-            className="ml-auto rounded bg-accent px-1.5 py-px text-[11px] font-medium text-white disabled:opacity-50"
+            className="ml-auto rounded bg-accent px-1.5 py-px text-[11px] font-medium text-accent-fg disabled:opacity-50"
           >
             {run.wrap_up ? "Wrapping up" : "Wrap it up"}
           </button>

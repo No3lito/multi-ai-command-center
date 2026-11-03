@@ -114,15 +114,17 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   await expect(card).toContainText("[Simulated] Example decision");
   await expect(card.getByTestId("decision-plan")).toContainText("Nothing more runs");
   await expect(card.getByTestId("decision-why")).toContainText("simulated example");
-  await expect(card.getByTestId("decision-note")).toHaveValue("Simulated test: record my answer only.");
-  await card.getByTestId("decision-note").fill("Looks good");
-  await card.getByTestId("decision-follow").click();
+  // The agents prepared ready-made answers: pick one, no note to write.
+  await expect(card.getByTestId("decision-option")).toHaveCount(3);
+  await expect(card.getByTestId("decision-option").first()).toHaveAttribute("aria-checked", "true");
+  await card.getByTestId("decision-send-option").click();
+  await expect(card.getByTestId("decision-confirm-box")).toContainText("Your answer: Yes, record it");
   await expect(card.getByTestId("decision-what-happens")).toContainText("Nothing more runs");
   await card.getByTestId("decision-confirm").click();
   await expect(decisions.getByTestId("decision-card")).toHaveCount(0);
   const decided = decisions.getByTestId("decision-decided-item");
   await expect(decided).toContainText("Approved");
-  await expect(decided).toContainText("Note: Looks good");
+  await expect(decided).toContainText("Note: Simulated test: record my answer only.");
   await expect(
     messages(page, { senderKind: "system", correlationId: runId! }).filter({ hasText: "Owner APPROVED" }),
   ).toHaveCount(1, { timeout: 10_000 });

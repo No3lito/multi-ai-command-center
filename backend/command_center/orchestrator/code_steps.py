@@ -521,6 +521,7 @@ class CodeSteps:
                             "on_approve": {"workflow": "none"},
                             "on_more_info": {"workflow": "code", "goal": run.goal},
                         },
+                        options=_card_options(ci.get("status") == "success"),
                         status="pending",
                     )
                 )
@@ -543,6 +544,29 @@ class CodeSteps:
             pending_decisions=[question] if pr else [],
         )
         return False
+
+
+def _card_options(tests_passed: bool) -> list[dict[str, str]]:
+    """Ready-made answers for a finished code job. Merging is offered only on green."""
+    send_back = {
+        "label": "Send it back to fix",
+        "detail": "The same writer fixes the remaining points, then tests and review run again.",
+        "answer": "more_info",
+        "note": "Fix the reviewer's remaining points and make the automatic tests pass.",
+    }
+    close = {
+        "label": "Close it",
+        "detail": "Throw this change away. Nothing changes in your code.",
+        "answer": "decline",
+        "note": "",
+    }
+    merge = {
+        "label": "Merge it",
+        "detail": "Put the change into main. Your computer updates within about 5 minutes.",
+        "answer": "approve",
+        "note": "",
+    }
+    return [merge, send_back, close] if tests_passed else [send_back, close]
 
 
 def _owner_note(state: dict[str, Any]) -> str:

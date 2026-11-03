@@ -77,6 +77,19 @@ function DecisionCard({
   const [confirming, setConfirming] = useState<DecisionAnswer | null>(null);
   const sending = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  // Ready-made answers: pick one (the best is preselected) instead of writing a note.
+  const options = decision.options ?? [];
+  const [picked, setPicked] = useState(0);
+  const [custom, setCustom] = useState(options.length === 0);
+  const [pickedLabel, setPickedLabel] = useState<string | null>(null);
+  const choose = (i: number) => {
+    const o = options[i];
+    if (!o) return;
+    setNote(o.note);
+    setBudget("");
+    setPickedLabel(o.label);
+    setConfirming(o.answer);
+  };
 
   const budgetNum = budget.trim() ? Number(budget) : undefined;
   const budgetBad = budgetNum !== undefined && (!Number.isFinite(budgetNum) || budgetNum <= 0 || budgetNum > 5);
@@ -157,46 +170,98 @@ function DecisionCard({
           If approved: {describePlan(decision.on_approve)}
         </p>
       )}
-      {showNote ? (
-        <div className="mt-1.5 space-y-1">
-          <textarea
-            data-testid="decision-note"
-            className="w-full rounded border border-line bg-bg p-1 text-xs"
-            rows={4}
-            maxLength={2000}
-            placeholder="Optional note or limit, e.g. cap at 50k Helius credits"
-            aria-label="Note for the agents"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-          <label className="flex items-center gap-1 text-[11px] text-muted">
-            Budget for the follow-up run, $
-            <input
-              data-testid="decision-budget"
-              className="w-16 rounded border border-line bg-bg px-1 py-0.5 text-xs"
-              inputMode="decimal"
-              placeholder="0.50"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
-            />
-          </label>
-          {budgetBad && <p className="text-[11px] text-danger">Budget must be above $0 and at most $5.</p>}
+      {!custom && (
+        <div className="mt-2" data-testid="decision-options">
+          <p className="text-[11px] font-semibold text-muted">Pick one. No note needed.</p>
+          <div role="radiogroup" aria-label="Your answer" className="mt-1 space-y-1.5">
+            {options.map((o, i) => (
+              <button
+                key={`${o.label}-${i}`}
+                type="button"
+                role="radio"
+                aria-checked={picked === i}
+                data-testid="decision-option"
+                onClick={() => setPicked(i)}
+                className={`flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left ${
+                  picked === i ? "border-2 border-accent bg-accent-soft" : "border border-line hover:border-muted"
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full ${
+                    picked === i ? "border-4 border-accent" : "border-2 border-muted"
+                  }`}
+                />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-semibold text-fg">{o.label}</span>
+                  {o.detail && <span className="block text-[12px] text-muted">{o.detail}</span>}
+                </span>
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            data-testid="decision-send-option"
+            className={`${btn} mt-2 w-full bg-accent py-2 text-[13px] text-accent-fg`}
+            disabled={!!busy || !onAnswer}
+            onClick={() => choose(picked)}
+          >
+            Send my answer: {options[picked]?.label}
+          </button>
+          <button
+            type="button"
+            data-testid="decision-write-own"
+            className="mt-1.5 text-[11px] text-muted underline"
+            onClick={() => {
+              setCustom(true);
+              setPickedLabel(null);
+            }}
+          >
+            Write my own note instead
+          </button>
         </div>
-      ) : (
-        <button
-          type="button"
-          className="mt-1 text-[11px] underline"
-          data-testid="decision-add-note"
-          onClick={() => setShowNote(true)}
-        >
-          Add a note or budget
-        </button>
       )}
-      {follow && (
+      {custom &&
+        (showNote ? (
+          <div className="mt-1.5 space-y-1">
+            <textarea
+              data-testid="decision-note"
+              className="w-full rounded border border-line bg-bg p-1 text-xs"
+              rows={4}
+              maxLength={2000}
+              placeholder="Optional note or limit, e.g. cap at 50k Helius credits"
+              aria-label="Note for the agents"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+            <label className="flex items-center gap-1 text-[11px] text-muted">
+              Budget for the follow-up run, $
+              <input
+                data-testid="decision-budget"
+                className="w-16 rounded border border-line bg-bg px-1 py-0.5 text-xs"
+                inputMode="decimal"
+                placeholder="0.50"
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+              />
+            </label>
+            {budgetBad && <p className="text-[11px] text-danger">Budget must be above $0 and at most $5.</p>}
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="mt-1 text-[11px] underline"
+            data-testid="decision-add-note"
+            onClick={() => setShowNote(true)}
+          >
+            Add a note or budget
+          </button>
+        ))}
+      {custom && follow && (
         <button
           type="button"
           data-testid="decision-follow"
-          className={`${btn} mt-2 w-full bg-accent py-1.5 text-white`}
+          className={`${btn} mt-2 w-full bg-accent py-1.5 text-accent-fg`}
           disabled={!!busy || !onAnswer || (follow !== "decline" && budgetBad)}
           onClick={() => setConfirming(follow)}
           title={note.trim() ? "Sends the note above with your answer" : undefined}
@@ -205,50 +270,52 @@ function DecisionCard({
           {note.trim() ? " (with the note)" : ""}
         </button>
       )}
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <button
-          type="button"
-          data-testid="decision-approve"
-          className={`${btn} ${follow ? "border border-line" : "bg-accent text-white"}`}
-          disabled={!!busy || !onAnswer || budgetBad}
-          onClick={() => setConfirming("approve")}
-        >
-          {busy === "approve" ? "Starting…" : "Approve"}
-        </button>
-        <button
-          type="button"
-          data-testid="decision-more-info"
-          className={`${btn} border border-line`}
-          disabled={!!busy || !onAnswer || budgetBad}
-          onClick={() => setConfirming("more_info")}
-        >
-          Need more info
-        </button>
-        <button
-          type="button"
-          data-testid="decision-decline"
-          className={`${btn} border border-line text-danger`}
-          disabled={!!busy || !onAnswer}
-          onClick={() => setConfirming("decline")}
-        >
-          Decline
-        </button>
-        <button
-          type="button"
-          data-testid="decision-dismiss"
-          className="ml-auto text-[10px] text-muted underline disabled:opacity-50"
-          disabled={!!busy || !onAnswer}
-          onClick={() => setConfirming("dismiss")}
-          title="No longer relevant; nothing runs"
-        >
-          Dismiss
-        </button>
-      </div>
+      {custom && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            data-testid="decision-approve"
+            className={`${btn} ${follow ? "border border-line" : "bg-accent text-accent-fg"}`}
+            disabled={!!busy || !onAnswer || budgetBad}
+            onClick={() => setConfirming("approve")}
+          >
+            {busy === "approve" ? "Starting…" : "Approve"}
+          </button>
+          <button
+            type="button"
+            data-testid="decision-more-info"
+            className={`${btn} border border-line`}
+            disabled={!!busy || !onAnswer || budgetBad}
+            onClick={() => setConfirming("more_info")}
+          >
+            Need more info
+          </button>
+          <button
+            type="button"
+            data-testid="decision-decline"
+            className={`${btn} border border-line text-danger`}
+            disabled={!!busy || !onAnswer}
+            onClick={() => setConfirming("decline")}
+          >
+            Decline
+          </button>
+          <button
+            type="button"
+            data-testid="decision-dismiss"
+            className="ml-auto text-[10px] text-muted underline disabled:opacity-50"
+            disabled={!!busy || !onAnswer}
+            onClick={() => setConfirming("dismiss")}
+            title="No longer relevant; nothing runs"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {confirming && (
         <div data-testid="decision-confirm-box" className="mt-2 rounded-md border border-accent bg-accent-soft p-2">
           <p className="text-[11px] font-semibold text-fg">
-            Your answer: {FOLLOW_LABEL[confirming]}
-            {note.trim() ? " (with the note above)" : ""}
+            Your answer: {pickedLabel ?? FOLLOW_LABEL[confirming]}
+            {!pickedLabel && note.trim() ? " (with the note above)" : ""}
           </p>
           <p className="mt-0.5 text-[11px] text-fg" data-testid="decision-what-happens">
             {whatHappens(decision, confirming, budgetNum)}
@@ -257,7 +324,7 @@ function DecisionCard({
             <button
               type="button"
               data-testid="decision-confirm"
-              className={`${btn} bg-accent text-white`}
+              className={`${btn} bg-accent text-accent-fg`}
               disabled={!!busy}
               onClick={() => void send(confirming)}
             >
