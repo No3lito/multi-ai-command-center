@@ -106,35 +106,21 @@ describe("RoomView Phase 1 composition", () => {
     state.runs = [];
   });
 
-  it("moves members into one named participant strip outside the header", async () => {
+  it("shows the members as small pictures in the header", async () => {
     const { container } = renderRoom();
-    const strip = await screen.findByRole("list", { name: "Participants" });
-    expect(strip).toHaveAttribute("data-testid", "room-members");
-    expect(within(strip).getByText("Noel")).toBeVisible();
-    expect(within(strip).getByText("Claude")).toBeVisible();
-    expect(strip.closest("header")).toBeNull();
-    expect(screen.getAllByTestId("room-members")).toHaveLength(1);
-    const header = container.querySelector("header");
-    expect(header).not.toBeNull();
-    expect(header).toHaveTextContent("2 members");
-    expect(header?.querySelector('[data-testid="room-members"]')).toBeNull();
-    expect(strip.querySelector('[role="status"]')).toBeNull();
+    const members = await screen.findByTestId("room-members");
+    expect(members.closest("header")).not.toBeNull();
+    expect(members).toHaveAttribute("aria-label", "2 members");
+    expect(within(members).getByRole("img", { name: "Noel" })).toBeInTheDocument();
+    expect(within(members).getByRole("img", { name: "Claude" })).toBeInTheDocument();
+    expect(container.querySelectorAll('[data-testid="room-members"]')).toHaveLength(1);
   });
 
-  it("omits the task/progress disclosure when no task data exists", async () => {
-    renderRoom();
-    await screen.findByRole("list", { name: "Participants" });
-    expect(screen.queryByText("Tasks and progress")).not.toBeInTheDocument();
-    expect(screen.queryByText("Existing task summary")).not.toBeInTheDocument();
-  });
-
-  it("shows populated task information in a keyboard-operable disclosure", async () => {
+  it("keeps the Decide tab to decisions and a short runs list", async () => {
     state.runs = [{ id: "run-1", status: "completed", archived_at: null }];
     renderRoom();
-    const summary = await screen.findByText("Tasks and progress");
-    const details = summary.closest("details");
-    expect(summary.tagName).toBe("SUMMARY");
-    expect(details).toHaveAttribute("open");
-    expect(details).toHaveTextContent("Existing task summary");
+    await screen.findByTestId("room-members");
+    expect(screen.queryByText("Tasks and progress")).not.toBeInTheDocument();
+    expect(screen.queryByText("Existing task summary")).not.toBeInTheDocument(); // it lives under History
   });
 });

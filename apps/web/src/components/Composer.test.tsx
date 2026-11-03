@@ -61,11 +61,23 @@ describe("Composer", () => {
   });
 });
 
-function Harness({ postMessage, delivered }: { postMessage: (r: string, t: string, k: string) => Promise<Message>; delivered: Message[] }) {
+function Harness({
+  postMessage,
+  delivered,
+}: {
+  postMessage: (r: string, t: string, k: string) => Promise<Message>;
+  delivered: Message[];
+}) {
   const outbox = useOutbox(ROOM_A, (m) => delivered.push(m), { postMessage });
   return (
     <>
-      <MessageList messages={[]} pending={outbox.pending} loading={false} onRetry={outbox.retry} onDiscard={outbox.discard} />
+      <MessageList
+        messages={[]}
+        pending={outbox.pending}
+        loading={false}
+        onRetry={outbox.retry}
+        onDiscard={outbox.discard}
+      />
       <Composer onSend={outbox.send} {...composerDeliveryState(outbox.pending)} />
     </>
   );
@@ -91,7 +103,7 @@ describe("Composer with outbox", () => {
     expect(failed).toBeInTheDocument();
     expect(screen.getByTestId("message-item")).toHaveAttribute("data-pending", "failed");
     expect(screen.getByRole("status")).toHaveTextContent("Use Retry or Discard");
-    expect(screen.getByTestId("message-item")).toHaveClass("speaker-card", "speaker-owner");
+    expect(screen.getByTestId("message-item").querySelector(".speaker-card")).toHaveClass("speaker-owner");
 
     await act(async () => {
       await user.click(screen.getByRole("button", { name: "Retry" }));
@@ -107,9 +119,12 @@ describe("Composer with outbox", () => {
   it("derives sending from the outbox and clears it after delivery", async () => {
     const user = userEvent.setup();
     let resolvePost!: (message: Message) => void;
-    const postMessage = vi.fn(() => new Promise<Message>((resolve) => {
-      resolvePost = resolve;
-    }));
+    const postMessage = vi.fn(
+      () =>
+        new Promise<Message>((resolve) => {
+          resolvePost = resolve;
+        }),
+    );
     render(<Harness postMessage={postMessage} delivered={[]} />);
     await user.type(screen.getByTestId("composer-input"), "hello{Enter}");
     expect(screen.getByRole("status")).toHaveTextContent("Sending…");

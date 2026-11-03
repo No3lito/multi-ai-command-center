@@ -56,13 +56,16 @@ describe("DecisionsPanel", () => {
       goal: "Evaluate Grok Bot's research log\nwith details",
     });
     const older = run({ brief: "**Bottom line:** Earlier result.", pending_decisions: [] });
-    render(<DecisionsPanel runs={[latest, older]} />);
-    expect(screen.getByTestId("decision-latest")).toHaveTextContent("No edge at a 5-second delay");
-    expect(screen.getByTestId("decision-latest")).toHaveTextContent("Evaluate Grok Bot's research log");
+    const { unmount } = render(<DecisionsPanel runs={[latest, older]} />);
+    // Look A1: while something waits on the owner, it comes first and the conclusion steps aside.
+    expect(screen.queryByTestId("decision-latest")).toBeNull();
     expect(screen.getAllByTestId("decision-item").map((li) => li.textContent)).toEqual([
       "Approve the launch coverage check (Helius credits).",
     ]);
-    expect(screen.getByTestId("decision-waiting")).toHaveTextContent("(1)");
+    unmount();
+    render(<DecisionsPanel runs={[{ ...latest, pending_decisions: [] }, older]} />);
+    expect(screen.getByTestId("decision-latest")).toHaveTextContent("No edge at a 5-second delay");
+    expect(screen.getByTestId("decision-latest")).toHaveTextContent("Evaluate Grok Bot's research log");
     expect(screen.queryByTestId("decision-brief")).not.toBeInTheDocument(); // past briefs live in History
   });
 

@@ -120,10 +120,10 @@ function DecisionCard({
     <li
       data-testid="decision-card"
       data-recommended={decision.recommended ?? undefined}
-      className="rounded-md border border-line bg-bg p-2 text-xs"
-      style={{ borderLeft: `4px solid ${EDGE[decision.recommended ?? "none"]}` }}
+      className="rounded-xl border border-line bg-panel-2 p-4 text-[13px]"
     >
-      <p className="font-medium text-fg">
+      <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-warn">Needs you</p>
+      <p className="text-[15px] font-semibold leading-snug text-fg">
         {decision.final_round && (
           <span
             data-testid="decision-final-round"
@@ -158,15 +158,17 @@ function DecisionCard({
           {decision.recommendation}
         </p>
       )}
-      <p className="mt-0.5 text-[11px] text-muted" data-testid="decision-cost">
-        Cost: {decision.cost || "unknown"}
-      </p>
+      {custom && (
+        <p className="mt-0.5 text-[11px] text-muted" data-testid="decision-cost">
+          Cost: {decision.cost || "unknown"}
+        </p>
+      )}
       {decision.cannot_run_reason ? (
         <p className="mt-0.5 text-[11px] text-warn" data-testid="decision-cannot-run">
           If approved: nothing starts. {decision.cannot_run_reason} Your answer is still recorded.
         </p>
       ) : (
-        <p className="mt-0.5 text-[11px] text-muted" data-testid="decision-plan">
+        <p className={`mt-0.5 text-[11px] text-muted ${custom ? "" : "sr-only"}`} data-testid="decision-plan">
           If approved: {describePlan(decision.on_approve)}
         </p>
       )}
@@ -347,13 +349,6 @@ function DecisionCard({
   );
 }
 
-const EDGE: Record<string, string> = {
-  approve: "#34C79A",
-  more_info: "#E3B341",
-  decline: "#F0616D",
-  none: "transparent",
-};
-
 function startsRun(d: Decision, answer: DecisionAnswer): boolean {
   if (answer === "decline" || answer === "dismiss") return false;
   if (answer === "approve" && d.cannot_run_reason) return false;
@@ -407,7 +402,7 @@ export function DecisionsPanel({ runs, decisions = [], onAnswer }: Props) {
 
   return (
     <PanelSection title="Decisions" count={waitingCount || withBriefs.length} testId="decisions-panel">
-      {latest && (
+      {latest && waitingCount === 0 && (
         <div className="mb-2 rounded-md border border-accent bg-accent-soft p-2 text-xs" data-testid="decision-latest">
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-accent">Latest conclusion</p>
           <p className="flex items-start gap-1.5 font-medium text-fg">
@@ -420,11 +415,9 @@ export function DecisionsPanel({ runs, decisions = [], onAnswer }: Props) {
         </div>
       )}
       <div className="mb-2" data-testid="decision-waiting">
-        <p className="mb-1 text-[11px] font-semibold text-fg">
-          Waiting on you {waitingCount > 0 && <span className="text-warn">({waitingCount})</span>}
-        </p>
+        {waitingCount === 0 && <p className="mb-1 text-[11px] font-semibold text-fg">Waiting on you</p>}
         {pending.length > 0 ? (
-          <ul className="space-y-2">
+          <ul className="space-y-3">
             {pending.map((d) => (
               <DecisionCard key={d.id} decision={d} onAnswer={onAnswer} />
             ))}
@@ -442,9 +435,11 @@ export function DecisionsPanel({ runs, decisions = [], onAnswer }: Props) {
         )}
       </div>
       {decided.length > 0 && (
-        <div className="mb-2" data-testid="decision-decided">
-          <p className="mb-1 text-[11px] font-semibold text-fg">Recently decided</p>
-          <ul className="space-y-1">
+        <details className="mb-2" data-testid="decision-decided">
+          <summary className="cursor-pointer text-[11px] font-semibold text-muted">
+            Recently decided ({decided.length})
+          </summary>
+          <ul className="mt-1 space-y-1">
             {decided.map((d) => (
               <li key={d.id} data-testid="decision-decided-item" className="text-[11px]">
                 <span
@@ -466,7 +461,7 @@ export function DecisionsPanel({ runs, decisions = [], onAnswer }: Props) {
               </li>
             ))}
           </ul>
-        </div>
+        </details>
       )}
     </PanelSection>
   );

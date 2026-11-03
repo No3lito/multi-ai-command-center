@@ -375,6 +375,15 @@ function ChatRow({ message, grouped, style }: { message: Message; grouped: boole
   const usage = isAgent ? message.usage : null;
   const tokens = usage ? (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) : 0;
   const mine = message.sender.kind === "owner" || message.sender.kind === "human";
+  // Look A1: details (model, tokens, cost) live in the time's tooltip, not on screen.
+  const details = [
+    t.full,
+    [provider, model].filter(Boolean).join(" / "),
+    usage ? `${formatCount(tokens)} tokens · ${simulated ? "no cost (simulated)" : formatUsd(usage.cost_usd)}` : "",
+    `#${message.seq}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <li
       data-testid="message-item"
@@ -388,42 +397,33 @@ function ChatRow({ message, grouped, style }: { message: Message; grouped: boole
       data-reply-to={message.reply_to ?? undefined}
       data-grouped={grouped || undefined}
       style={{ "--speaker-color": style.color } as CSSProperties}
-      className={`group speaker-card ${grouped ? "speaker-continuation" : ""} ${mine ? "speaker-owner" : ""}`}
+      className={`group flex gap-3 ${mine ? "flex-row-reverse" : ""} ${grouped ? "mt-1" : "mt-4"}`}
     >
-      <div className="min-w-0">
+      <div className="w-8 shrink-0">
+        {!grouped && <Avatar style={style} label={message.sender.display_name} size={32} />}
+      </div>
+      <div className={`speaker-card ${mine ? "speaker-owner" : "flex-1"}`}>
         {!grouped && (
-          <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-            <Avatar style={style} label={message.sender.display_name} />
+          <div className="mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span data-testid="sender-name" className="font-semibold" style={{ color: style.color }}>
               {mine ? "You" : message.sender.display_name}
             </span>
             {!isAgent && !mine && <KindBadge kind={message.sender.kind} />}
             {simulated && <SimulatedBadge />}
             {message.kind !== "chat" && <span className="font-mono text-[10px] text-muted">{message.kind}</span>}
-            <time dateTime={message.created_at} title={t.full} className="text-xs text-muted">
+            <time
+              dateTime={message.created_at}
+              title={details}
+              data-testid="message-time"
+              className="text-xs text-muted"
+            >
               {t.short}
             </time>
-            {(provider || model) && (
-              <span
-                data-testid="message-model"
-                title={`Message #${message.seq}`}
-                className="ml-auto font-mono text-[10px] text-muted opacity-70 group-hover:opacity-100"
-              >
-                {[provider, model].filter(Boolean).join(" / ")}
-              </span>
-            )}
           </div>
         )}
         <Folded text={message.body.text}>
           <Markdown text={message.body.text} />
         </Folded>
-        {usage && (
-          <p data-testid="message-usage" className="mt-1 font-mono text-[10px] text-muted">
-            {formatCount(usage.input_tokens)} in, {formatCount(usage.output_tokens)} out ({formatCount(tokens)} tokens)
-            {" · "}
-            {simulated ? "no cost (simulated)" : formatUsd(usage.cost_usd)}
-          </p>
-        )}
       </div>
     </li>
   );
@@ -447,17 +447,32 @@ function SystemNote({ message }: { message: Message }) {
       <span aria-hidden="true" className="mt-px shrink-0">
         {isError ? <ErrorIcon /> : <NoteIcon kind={message.kind} />}
       </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-2">
-          <span className="font-semibold">{message.sender.display_name}</span>
-          {isError && label && <strong>{label}</strong>}
-          <time dateTime={message.created_at} title={t.full} className="text-[13px]">
+      {isError ? (
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <span className="font-semibold">{message.sender.display_name}</span>
+            {label && <strong>{label}</strong>}
+            <time dateTime={message.created_at} title={`${t.full} · #${message.seq}`} className="text-[13px]">
+              {t.short}
+            </time>
+          </div>
+          <p className="whitespace-pre-wrap break-words">{message.body.text}</p>
+        </div>
+      ) : (
+        // Look A1: one quiet line, "Coordinator · what happened", time at the end.
+        <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+          <span className="font-medium">{message.sender.display_name}</span>
+          <span aria-hidden="true"> · </span>
+          {message.body.text}
+          <time
+            dateTime={message.created_at}
+            title={`${t.full} · #${message.seq}`}
+            className="ml-2 text-[11px] opacity-70"
+          >
             {t.short}
           </time>
-          <span className="ml-auto font-mono text-[10px] opacity-0 group-hover:opacity-100">#{message.seq}</span>
-        </div>
-        <p className={`whitespace-pre-wrap break-words ${isError ? "" : "text-fg/80"}`}>{message.body.text}</p>
-      </div>
+        </p>
+      )}
     </li>
   );
 }
@@ -513,26 +528,31 @@ function PendingRow({
       data-sender-style={style.key}
       data-accent={style.color === "var(--speaker-rose)" ? "rose" : undefined}
       style={{ "--speaker-color": style.color } as CSSProperties}
-      className="speaker-card speaker-owner"
+      className="mt-4 flex flex-row-reverse gap-3"
     >
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <Avatar style={style} label="You" />
-        <span className="font-semibold">You</span>
-        <span className="speaker-role">You</span>
-        <span className="text-xs text-muted">{failed ? "Not sent" : "Sending..."}</span>
+      <div className="w-8 shrink-0">
+        <Avatar style={style} label="You" size={32} />
       </div>
-      <p className="whitespace-pre-wrap break-words">{item.text}</p>
-      {failed && (
-        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs">
-          <span className="text-danger">{item.error}</span>
-          <button type="button" onClick={() => onRetry(item.key)} className="font-medium text-fg underline">
-            Retry
-          </button>
-          <button type="button" onClick={() => onDiscard(item.key)} className="text-muted underline">
-            Discard
-          </button>
+      <div className="speaker-card speaker-owner">
+        <div className="mb-1 flex flex-wrap items-baseline gap-2">
+          <span className="font-semibold" style={{ color: style.color }}>
+            You
+          </span>
+          <span className="text-xs text-muted">{failed ? "Not sent" : "Sending..."}</span>
         </div>
-      )}
+        <p className="whitespace-pre-wrap break-words">{item.text}</p>
+        {failed && (
+          <div className="mt-1 flex flex-wrap items-center gap-3 text-xs">
+            <span className="text-danger">{item.error}</span>
+            <button type="button" onClick={() => onRetry(item.key)} className="font-medium text-fg underline">
+              Retry
+            </button>
+            <button type="button" onClick={() => onDiscard(item.key)} className="text-muted underline">
+              Discard
+            </button>
+          </div>
+        )}
+      </div>
     </li>
   );
 }

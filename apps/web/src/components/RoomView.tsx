@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, isApiError } from "@/lib/api";
-import { isRunActive, type Agent, type CodeJobs, type Room, type RoomDetail } from "@/lib/types";
+import { isRunActive, type Agent, type CodeJobs, type Room, type RoomDetail, type Run } from "@/lib/types";
+import { formatUsd } from "@/lib/format";
 import { useAgents } from "@/lib/useAgents";
 import { useDecisions } from "@/lib/useDecisions";
 import { speakerId } from "@/lib/senderStyle";
@@ -208,9 +209,17 @@ export function RoomView(props: Props) {
                 Project: {projectTitle(workspace, roomDetail.project_path)}
               </span>
             )}
-            {memberCount !== undefined && (
-              <span className="shrink-0 text-xs text-muted">
-                {memberCount} {memberCount === 1 ? "member" : "members"}
+            {roomDetail && (
+              <span
+                data-testid="room-members"
+                aria-label={`${memberCount ?? roomDetail.members.length} members`}
+                className="flex shrink-0 items-center gap-1 self-center"
+              >
+                {roomDetail.members.map((member) => (
+                  <span key={member.id} className="flex">
+                    <Avatar style={participantStyles.get(speakerId(member))!} label={member.display_name} size={22} />
+                  </span>
+                ))}
               </span>
             )}
           </h1>
@@ -218,6 +227,11 @@ export function RoomView(props: Props) {
           <h1 className="font-semibold text-muted">No room selected</h1>
         )}
       </div>
+      {usage.usage && (
+        <span data-testid="header-spend" className="hidden shrink-0 text-xs text-muted sm:inline">
+          Spent {formatUsd(usage.usage.spent_usd)} of {formatUsd(usage.usage.cap_usd)}
+        </span>
+      )}
       <ThemeToggle />
       {roomId && !notFound && detail.kind === "ready" && (
         <button
@@ -310,16 +324,6 @@ export function RoomView(props: Props) {
     <>
       <main className="flex min-w-0 flex-1 flex-col bg-bg">
         {header}
-        {roomDetail && (
-          <ul aria-label="Participants" data-testid="room-members" className="participant-strip">
-            {roomDetail.members.map((member) => (
-              <li key={member.id} className="flex shrink-0 items-center gap-2">
-                <Avatar style={participantStyles.get(speakerId(member))!} label={member.display_name} size={24} />
-                <span>{member.display_name}</span>
-              </li>
-            ))}
-          </ul>
-        )}
         {body}
       </main>
       <RightPanel
@@ -340,21 +344,10 @@ export function RoomView(props: Props) {
             }}
           />
         )}
-        {roomDetail && !notFound && roomId && (runs.runs.length > 0 || decisions.decisions.length > 0) && (
-          <details open className="task-progress">
-            <summary>Tasks and progress</summary>
-            <SummaryPanel
-              runs={runs.runs}
-              decisions={decisions.decisions}
-              usage={usage.usage}
-              since={lastSeenFor(roomId)}
-              agentName={agentName}
-            />
-          </details>
-        )}
         {roomDetail && !notFound && roomId && tab === "decide" && (
           <div role="tabpanel" id="tabpanel-decide" aria-labelledby="tab-decide">
             <DecisionsPanel runs={runs.runs} decisions={decisions.decisions} onAnswer={onAnswer} />
+            <RunsMini runs={runs.runs} agentName={agentName} onAll={() => setTab("runs")} />
             <InboxPanel workspace={workspace} onFile={fileInbox} />
           </div>
         )}
@@ -375,6 +368,13 @@ export function RoomView(props: Props) {
         )}
         {roomDetail && !notFound && roomId && tab === "history" && (
           <div role="tabpanel" id="tabpanel-history" aria-labelledby="tab-history">
+            <SummaryPanel
+              runs={runs.runs}
+              decisions={decisions.decisions}
+              usage={usage.usage}
+              since={lastSeenFor(roomId)}
+              agentName={agentName}
+            />
             <HistoryPanel
               roomId={roomId}
               client={api}
@@ -501,5 +501,72 @@ function PanelIcon() {
       <rect x="2" y="3" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.6" />
       <path d="M11 3v12" stroke="currentColor" strokeWidth="1.6" />
     </svg>
+  );
+}
+
+/** Look A1: the last few runs under the decision card; the Runs tab has the full list. */
+function RunsMini({
+  runs,
+  agentName,
+  onAll,
+}: {
+  runs: readonly Run[];
+  agentName: (id: string | null) => string | null;
+  onAll: () => void;
+}) {
+  const live = runs.filter((r) => !r.archived_at);
+  const shown = [...live.filter(isRunActive), ...live.filter((r) => !isRunActive(r))].slice(0, 3);
+  if (shown.length === 0) return null;
+  const label: Record<string, string> = {
+    queued: "Queued",
+    running: "Running",
+    waiting: "Waiting",
+    completed: "Done",
+    failed: "Failed",
+    cancelled: "Cancelled",
+    budget_exceeded: "Over budget",
+  };
+  const kind: Record<string, string> = {
+    collab: "Collaborate",
+    build: "Design & build",
+    review: "Review",
+    code: "Code change",
+    reply: "Reply",
+  };
+  return (
+    <section data-testid="runs-mini" className="border-b border-line px-4 py-4">
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted">Runs</h2>
+        <button type="button" onClick={onAll} className="text-xs text-muted underline hover:text-fg">
+          See all
+        </button>
+      </div>
+      <ul className="space-y-2">
+        {shown.map((r) => (
+          <li key={r.id} className="rounded-lg border border-line bg-panel-2 px-3 py-2">
+            <div className="flex items-center gap-2 text-[11px]">
+              <span
+                className={`rounded-full px-2 py-px font-medium ${
+                  isRunActive(r)
+                    ? "bg-accent-soft text-accent-ink"
+                    : r.status === "completed"
+                      ? "bg-ok-soft text-ok"
+                      : "bg-danger-soft text-danger"
+                }`}
+              >
+                {label[r.status] ?? r.status}
+              </span>
+              <span className="text-muted">{kind[r.kind] ?? r.kind}</span>
+            </div>
+            <p className="mt-1 line-clamp-2 text-[13px] text-fg">{(r.goal ?? "").split("\n")[0]}</p>
+            <p className="mt-0.5 text-[11px] text-muted">
+              {isRunActive(r) ? `${r.turn_count ?? 0} of ${r.max_turns ?? 0} turns · ` : ""}
+              {formatUsd(r.spent_usd)} of {formatUsd(r.budget_usd)}
+              {r.kind === "code" && agentName(r.planner_id) ? ` · ${agentName(r.planner_id)} writes` : ""}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

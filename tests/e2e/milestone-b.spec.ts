@@ -86,10 +86,12 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   await expect(runItem.getByTestId("run-spent")).toHaveText("$0.00 of $0.50");
 
   // The run ends with a decision brief, shown under Decide.
-  await tab(page, "decide");
+  // Look A1: the summary lives under History; Decide shows what needs you and a short runs list.
+  await tab(page, "history");
   await expect(page.getByTestId("summary-finished")).toContainText("1 run finished");
+  await tab(page, "decide");
+  await expect(page.getByTestId("runs-mini")).toContainText("Done");
   const decisions = page.getByTestId("decisions-panel");
-  await expect(decisions.getByTestId("decision-latest")).toBeVisible();
   await expect(decisions.getByTestId("decision-waiting")).toBeVisible();
 
   // Coordinator: four task.assign notes (plan, critique, revise, brief) and one task.result.
