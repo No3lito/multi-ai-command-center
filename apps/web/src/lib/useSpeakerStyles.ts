@@ -1,26 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { assignSpeakerStyles, type SenderStyle, type Speaker } from "./senderStyle";
+import { useEffect, useMemo } from "react";
+import { assignSpeakerStyles, pendingSpeaker, type SenderStyle, type Speaker } from "./senderStyle";
 
-/** Allocate during calculation; commit the registry after rendering. */
-export function useSpeakerStyles(senders: readonly Speaker[]) {
-  const [registry, setRegistry] = useState<ReadonlyMap<string, SenderStyle>>(() => new Map());
-  const styles = useMemo(() => {
-    const hasHuman = senders.some((sender) => sender.kind === "owner" || sender.kind === "human");
-    return assignSpeakerStyles(
-      hasHuman
-        ? senders
-        : [...senders, { id: "pending-owner", kind: "owner", display_name: "You" }],
-      registry,
-    );
-  }, [senders, registry]);
+/** Calculate from metadata; persist allocations after commit without another render. */
+export function useSpeakerStyles(senders: readonly Speaker[], hasPending = false) {
+  const registry = useMemo(() => new Map<string, SenderStyle>(), []);
+  const effectiveSenders = hasPending ? [...senders, pendingSpeaker(senders)] : senders;
+  // Serialize only allocation metadata so fresh caller arrays do not invalidate the memo.
+  const signature = JSON.stringify(effectiveSenders.map((sender) => ({
+    id: sender.principal_id ?? sender.id ?? sender.display_name,
+    kind: sender.kind,
+    display_name: sender.display_name,
+  })));
+  const styles = useMemo(
+    () => assignSpeakerStyles(JSON.parse(signature) as Speaker[], registry),
+    [signature, registry],
+  );
 
   useEffect(() => {
-    if (styles.size === registry.size) return;
-    // Persist newly discovered identities without setting state during render.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRegistry(styles);
+    for (const [id, style] of styles) registry.set(id, style);
   }, [styles, registry]);
 
   return styles;

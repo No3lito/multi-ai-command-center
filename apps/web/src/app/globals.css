@@ -164,6 +164,7 @@ body {
 .system-action[data-note-kind="error"] {
   border-left-color: var(--danger);
   background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .composer {

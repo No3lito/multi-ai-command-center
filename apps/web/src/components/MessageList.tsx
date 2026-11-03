@@ -5,7 +5,7 @@ import { formatCount, formatUsd } from "@/lib/format";
 import { foldRuns } from "@/lib/foldRuns";
 import { isRunActive, type Message, type PrincipalKind, type Run } from "@/lib/types";
 import type { PendingMessage } from "@/lib/useOutbox";
-import { speakerId, type SenderStyle, type Speaker } from "@/lib/senderStyle";
+import { pendingSpeaker, speakerId, type SenderStyle, type Speaker } from "@/lib/senderStyle";
 import { useSpeakerStyles } from "@/lib/useSpeakerStyles";
 import { Avatar } from "./Avatar";
 import { bottomLine } from "./DecisionsPanel";
@@ -67,12 +67,10 @@ interface Props {
 
 export function MessageList({ messages, pending, loading, onRetry, onDiscard, runs, onArchive, participants = [], speakerStyles }: Props) {
   const senders = [...participants, ...messages.map((message) => message.sender)];
-  const localStyles = useSpeakerStyles(senders);
+  const localStyles = useSpeakerStyles(senders, pending.length > 0);
   const styles = speakerStyles ?? localStyles;
-  const pendingSender = senders.find((sender) => sender.kind === "owner") ??
-    senders.find((sender) => sender.kind === "human") ??
-    { id: "pending-owner", kind: "owner", display_name: "You" };
-  const pendingStyle = styles.get(speakerId(pendingSender))!;
+  const pendingId = speakerId(pendingSpeaker(senders));
+  const pendingStyle = styles.get(pendingId) ?? localStyles.get(pendingId)!;
   // Runs the owner watched in progress stay open after they finish; older ones start folded.
   const [seenActive, setSeenActive] = useState<ReadonlySet<string>>(() => new Set());
   const [openRuns, setOpenRuns] = useState<Record<string, boolean>>({});
@@ -444,9 +442,7 @@ function SystemNote({ message }: { message: Message }) {
       data-note-kind={message.kind}
       data-correlation-id={message.correlation_id ?? undefined}
       data-system-tier={label ? "action" : "routine"}
-      className={`group system-note ${label ? "system-action" : ""} ${
-        isError ? "bg-danger-soft text-danger" : "text-muted"
-      }`}
+      className={`group system-note text-muted ${label ? "system-action" : ""}`}
     >
       <span aria-hidden="true" className="mt-px shrink-0">
         {isError ? <ErrorIcon /> : <NoteIcon kind={message.kind} />}

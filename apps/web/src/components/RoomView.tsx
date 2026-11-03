@@ -177,7 +177,7 @@ export function RoomView(props: Props) {
   const participantStyles = useSpeakerStyles([
     ...(roomDetail?.members ?? []),
     ...stream.messages.map((message) => message.sender),
-  ]);
+  ], outbox.pending.length > 0);
   const header = (
     <header className="room-header sticky top-0 z-20 flex min-h-16 shrink-0 flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2">
       <button

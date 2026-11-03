@@ -33,6 +33,14 @@ describe("senderStyle", () => {
     expect(styles.get("agent:second")?.color).toBe("var(--speaker-blue)");
   });
 
+  it("matches message principal ids to room member ids", () => {
+    const member = { id: "claude", kind: "agent", display_name: "Claude" };
+    const sender = { principal_id: "claude", kind: "agent", display_name: "Claude" };
+    expect(speakerId(sender)).toBe(speakerId(member));
+    expect(assignSpeakerStyles([member, sender]).size).toBe(1);
+    expect(speakerId({ ...sender, principal_id: "another-claude" })).not.toBe(speakerId(member));
+  });
+
   it("supports CSS-variable avatar tints without parsing them as hex", () => {
     expect(tint("var(--speaker-claude)", 0.12)).toBe(
       "color-mix(in srgb, var(--speaker-claude) 12%, transparent)",

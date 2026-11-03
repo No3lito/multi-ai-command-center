@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { msg } from "@/test/fakeWebSocket";
+import { senderStyle } from "@/lib/senderStyle";
 import { MessageList } from "./MessageList";
 
 describe("MessageList", () => {
@@ -19,7 +20,7 @@ describe("MessageList", () => {
   it("groups the same identity without grouping different ids with the same name", () => {
     const first = msg(1);
     const second = { ...msg(2), sender: { ...first.sender } };
-    const third = { ...msg(3), sender: { ...first.sender, id: "different-principal" } };
+    const third = { ...msg(3), sender: { ...first.sender, principal_id: "different-principal" } };
     render(
       <MessageList messages={[first, second, third]} pending={[]} loading={false} onRetry={() => {}} onDiscard={() => {}} />,
     );
@@ -46,10 +47,10 @@ describe("MessageList", () => {
 
   it("keeps names, initials and roles visible without depending on color", () => {
     const speakers = [
-      { id: "owner", kind: "owner" as const, display_name: "Noel" },
-      { id: "claude", kind: "agent" as const, display_name: "Claude" },
-      { id: "gpt", kind: "agent" as const, display_name: "GPT" },
-      { id: "external", kind: "external" as const, display_name: "External tool" },
+      { principal_id: "owner", kind: "owner" as const, display_name: "Noel" },
+      { principal_id: "claude", kind: "agent" as const, display_name: "Claude" },
+      { principal_id: "gpt", kind: "agent" as const, display_name: "GPT" },
+      { principal_id: "external", kind: "external" as const, display_name: "External tool" },
     ];
     render(
       <MessageList
@@ -72,10 +73,10 @@ describe("MessageList", () => {
 
   it("uses allocated colors for duplicate names and exposes rose as an accent", () => {
     const speakers = [
-      { id: "claude-1", kind: "agent" as const, display_name: "Claude" },
-      { id: "claude-2", kind: "agent" as const, display_name: "Claude" },
+      { principal_id: "claude-1", kind: "agent" as const, display_name: "Claude" },
+      { principal_id: "claude-2", kind: "agent" as const, display_name: "Claude" },
       ...Array.from({ length: 3 }, (_, index) => ({
-        id: `other-${index}`, kind: "agent" as const, display_name: `Other ${index}`,
+        principal_id: `other-${index}`, kind: "agent" as const, display_name: `Other ${index}`,
       })),
     ];
     render(
@@ -94,8 +95,8 @@ describe("MessageList", () => {
   });
 
   it("preserves allocated identities when new speakers arrive", () => {
-    const first = { ...msg(1), sender: { id: "first", kind: "agent" as const, display_name: "First" } };
-    const second = { ...msg(2), sender: { id: "second", kind: "agent" as const, display_name: "Second" } };
+    const first = { ...msg(1), sender: { principal_id: "first", kind: "agent" as const, display_name: "First" } };
+    const second = { ...msg(2), sender: { principal_id: "second", kind: "agent" as const, display_name: "Second" } };
     const props = { pending: [], loading: false, onRetry: () => {}, onDiscard: () => {} };
     const { rerender } = render(<MessageList {...props} messages={[first]} />);
     const color = screen.getByTestId("message-item").style.getPropertyValue("--speaker-color");
@@ -118,6 +119,87 @@ describe("MessageList", () => {
     const jump = screen.getByRole("button", { name: "New messages ↓" });
     fireEvent.click(jump);
     expect(screen.queryByRole("button", { name: "New messages ↓" })).not.toBeInTheDocument();
+  });
+
+  it("groups consecutive agent messages under one identity header", () => {
+    const sender = {
+      principal_id: "claude",
+      kind: "agent" as const,
+      display_name: "Claude",
+    };
+    render(
+      <MessageList
+        messages={[
+          { ...msg(1), sender },
+          { ...msg(2), sender: { ...sender } },
+        ]}
+        pending={[]}
+        loading={false}
+        onRetry={() => {}}
+        onDiscard={() => {}}
+      />,
+    );
+    const rows = screen.getAllByTestId("message-item");
+    expect(rows[0]).not.toHaveAttribute("data-grouped");
+    expect(rows[1]).toHaveAttribute("data-grouped", "true");
+    expect(screen.getAllByText("Claude")).toHaveLength(1);
+    expect(rows[1]).toHaveTextContent("#2");
+  });
+
+  it("keeps plain coordinator chat visible in the routine tier and breaks grouping", () => {
+    const sender = {
+      principal_id: "gpt",
+      kind: "agent" as const,
+      display_name: "GPT",
+    };
+    render(
+      <MessageList
+        messages={[
+          { ...msg(1), sender },
+          {
+            ...msg(2, undefined, "Coordinator chat remains visible."),
+            sender: {
+              principal_id: "coordinator",
+              kind: "system" as const,
+              display_name: "Coordinator",
+            },
+            kind: "chat",
+          },
+          { ...msg(3), sender },
+        ]}
+        pending={[]}
+        loading={false}
+        onRetry={() => {}}
+        onDiscard={() => {}}
+      />,
+    );
+    const rows = screen.getAllByTestId("message-item");
+    expect(rows[1]).toHaveAttribute("data-system-tier", "routine");
+    expect(rows[1]).toHaveTextContent("Coordinator chat remains visible.");
+    expect(rows[2]).not.toHaveAttribute("data-grouped");
+    expect(screen.getAllByText("GPT")).toHaveLength(2);
+  });
+
+  it("uses the shared owner's allocated rose accent for pending delivery", () => {
+    const owner = { id: "noel", kind: "owner", display_name: "Noel" };
+    const styles = new Map([
+      ["owner:noel", { ...senderStyle(owner), color: "var(--speaker-rose)" }],
+    ]);
+    render(
+      <MessageList
+        messages={[]}
+        participants={[owner]}
+        speakerStyles={styles}
+        pending={[{ key: "pending-1", text: "Retry me", status: "failed", error: "Offline" }]}
+        loading={false}
+        onRetry={() => {}}
+        onDiscard={() => {}}
+      />,
+    );
+    const row = screen.getByTestId("message-item");
+    expect(row).toHaveAttribute("data-accent", "rose");
+    expect(row.style.getPropertyValue("--speaker-color")).toBe("var(--speaker-rose)");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
   it("has a polite live region", () => {

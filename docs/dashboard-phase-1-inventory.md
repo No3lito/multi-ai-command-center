@@ -62,7 +62,11 @@ props, and workflows are retained without rewriting their internal controls.
 
 - Participant avatars, delivered cards, and pending cards use room-allocated
   identities; message rendering no longer bypasses allocation with fixed fallbacks.
-- Newly discovered identities are committed after rendering, not during it.
+- Newly discovered identities are committed to a room-local allocation cache
+  after rendering, without a state-update effect or an additional render.
+  Equivalent sender metadata reuses the memoized allocation.
+- Message principal IDs and room-member IDs resolve to the same identity.
+  A fallback owner is allocated only when pending delivery needs one.
 - Grouped messages omit repeated identity headers in JSX while retaining each
   message's timestamp, sequence, model, usage, and other delivery metadata.
 - External integrations receive the System role badge and retain their explicit
@@ -77,6 +81,13 @@ props, and workflows are retained without rewriting their internal controls.
   rose accents, non-color identity labels, and outbox-derived composer states.
   The outbox integration harness uses the same delivery-state helper as RoomView;
   it does not replace a complete RoomView integration or browser test.
+- Added focused RoomView composition tests for the participant strip and
+  conditional task disclosure, plus agent grouping, routine coordinator chat,
+  pending rose accents, and Avatar's use of the shared tint helper.
+  RoomView management panels and platform hooks are mocked in these tests;
+  they are not live integration or browser verification.
+- Error-notice foreground and background now have one CSS styling source.
+  Plain coordinator chat intentionally uses the routine tier and retains its body.
 
 ## Verification still required
 

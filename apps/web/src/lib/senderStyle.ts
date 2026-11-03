@@ -1,6 +1,7 @@
 /** Identity comes only from platform sender metadata, never message text. */
 export interface Speaker {
-  id?: string;
+  id?: string | undefined;
+  principal_id?: string | undefined;
   kind: string;
   display_name: string;
 }
@@ -13,7 +14,13 @@ export interface SenderStyle {
 }
 
 export function speakerId(sender: Speaker): string {
-  return `${sender.kind}:${sender.id ?? sender.display_name}`;
+  return `${sender.kind}:${sender.principal_id ?? sender.id ?? sender.display_name}`;
+}
+
+export function pendingSpeaker(senders: readonly Speaker[]): Speaker {
+  return senders.find((sender) => sender.kind === "owner") ??
+    senders.find((sender) => sender.kind === "human") ??
+    { id: "pending-owner", kind: "owner", display_name: "You" };
 }
 
 export function senderStyle(sender: Speaker): SenderStyle {
