@@ -110,7 +110,7 @@ export function Shell({ principal, onSignOut }: { principal: Principal; onSignOu
             setLeftOpen(false);
             setRightOpen(false);
           }}
-          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
         />
       )}
 

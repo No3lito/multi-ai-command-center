@@ -13,7 +13,6 @@ function section(start: string): string {
 }
 const dark = section(":root {");
 const light = section(':root[data-theme="light"] {');
-const lightMedia = section(':root:not([data-theme="dark"]) {');
 
 function token(block: string, name: string): string {
   const m = new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`).exec(block);
@@ -45,10 +44,20 @@ describe("tokens.css", () => {
     expect(token(dark, "--accent")).toBe("#e0679e");
   });
 
-  it("keeps the light theme identical for the media query and the data attribute", () => {
-    for (const name of ["--bg", "--sidebar", "--panel", "--panel-2", "--border", "--text", "--muted", "--disabled"]) {
-      expect(token(lightMedia, name)).toBe(token(light, name));
-    }
+  it("is dark by default and light only when selected explicitly", () => {
+    expect(css).not.toContain("prefers-color-scheme");
+    expect(dark).toContain("color-scheme: dark");
+    expect(token(dark, "--bg")).toBe("#0f1115");
+    expect(light).toContain("color-scheme: light");
+    expect(token(light, "--bg")).toBe("#f6f7f9");
+  });
+
+  it("switches the sidebar at 768px (md), not lg", () => {
+    const sidebar = readFileSync(resolve(process.cwd(), "src/components/Sidebar.tsx"), "utf8");
+    const shell = readFileSync(resolve(process.cwd(), "src/components/Shell.tsx"), "utf8");
+    expect(sidebar).not.toMatch(/lg:/);
+    expect(sidebar).toContain("md:static");
+    expect(shell).toContain("md:hidden");
   });
 
   it("meets contrast for text in both themes", () => {

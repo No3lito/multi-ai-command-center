@@ -139,9 +139,20 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard, ru
         )}
 
         <ol>
-          {items.map((item) =>
+          {items.map((item, i) =>
             item.type === "message" ? (
-              <MessageRow key={item.message.id} message={item.message} />
+              <MessageRow
+                key={item.message.id}
+                message={item.message}
+                grouped={(() => {
+                  const prev = items[i - 1];
+                  return (
+                    prev?.type === "message" &&
+                    prev.message.sender.kind === item.message.sender.kind &&
+                    prev.message.sender.display_name === item.message.sender.display_name
+                  );
+                })()}
+              />
             ) : (
               <RunFold
                 key={item.runId}
@@ -295,11 +306,11 @@ export function isSimulatedMessage(message: Message): boolean {
   return message.body.data?.simulated === true;
 }
 
-function MessageRow({ message }: { message: Message }) {
+function MessageRow({ message, grouped = false }: { message: Message; grouped?: boolean }) {
   if (message.sender.kind === "system" && (SYSTEM_NOTE_KINDS.has(message.kind) || message.kind === "error")) {
     return <SystemNote message={message} />;
   }
-  return <ChatRow message={message} />;
+  return <ChatRow message={message} grouped={grouped} />;
 }
 
 export function SimulatedBadge() {
@@ -314,7 +325,7 @@ export function SimulatedBadge() {
   );
 }
 
-function ChatRow({ message }: { message: Message }) {
+function ChatRow({ message, grouped }: { message: Message; grouped: boolean }) {
   const t = formatTime(message.created_at);
   const data = message.body.data;
   const isAgent = message.sender.kind === "agent";
@@ -335,11 +346,14 @@ function ChatRow({ message }: { message: Message }) {
       data-simulated={simulated || undefined}
       data-correlation-id={message.correlation_id ?? undefined}
       data-reply-to={message.reply_to ?? undefined}
-      className={`group my-1.5 flex gap-2 ${mine ? "flex-row-reverse" : ""}`}
+      data-grouped={grouped || undefined}
+      className={`group flex gap-2 ${grouped ? "mt-[var(--space-1)]" : "mt-[var(--space-3)]"} ${
+        mine ? "flex-row-reverse" : ""
+      }`}
     >
       <Avatar style={style} label={message.sender.display_name} />
       <div
-        className={`min-w-0 rounded-lg px-3 py-2 ${mine ? "max-w-[85%] bg-panel-2" : "max-w-[72ch] flex-1"}`}
+        className={`min-w-0 rounded-lg px-3 py-2 ${mine ? "max-w-[85%] bg-panel-2" : "max-w-[var(--chat-measure)] flex-1"}`}
       >
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="inline-flex items-center gap-2 font-semibold text-fg">

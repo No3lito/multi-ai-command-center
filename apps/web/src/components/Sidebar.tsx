@@ -26,8 +26,8 @@ export function Sidebar({ open, principal, rooms, selectedId, onSelect, onCreate
       <aside
         id="left-sidebar"
         aria-label="Rooms"
-        className={`fixed inset-y-0 left-0 z-40 flex w-[min(var(--drawer-w),100vw)] shrink-0 flex-col border-r border-line bg-sidebar transition-transform lg:w-[var(--sidebar-w)] lg:static lg:translate-x-0 ${
-          open ? "translate-x-0" : "-translate-x-full invisible lg:visible"
+        className={`fixed inset-y-0 left-0 z-40 flex w-[min(var(--drawer-w),100vw)] shrink-0 flex-col border-r border-line bg-sidebar transition-transform md:w-[var(--sidebar-w)] md:static md:translate-x-0 ${
+          open ? "translate-x-0" : "-translate-x-full invisible md:visible"
         }`}
       >
         <div className="flex h-12 items-center gap-2 border-b border-line px-3">
@@ -82,7 +82,7 @@ export function Sidebar({ open, principal, rooms, selectedId, onSelect, onCreate
                           : "border-transparent text-muted hover:bg-panel-2 hover:text-fg"
                       }`}
                     >
-                      <span aria-hidden="true" className="font-mono text-muted">
+                      <span aria-hidden="true" className="text-muted">
                         #
                       </span>
                       <span className="min-w-0 flex-1 truncate">{room.name}</span>
