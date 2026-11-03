@@ -182,7 +182,8 @@ class CodeSteps:
             run.planner_id,
             f"You are the writer of a code change to the Command Center's own repository "
             f"({self.gh.repo}); {reviewer} will review it and the owner decides whether it merges. "
-            f"Goal: {run.goal}\n\n{RULES}\n\nThese are the repository's files on {state['base']} "
+            f"Goal: {run.goal}\n\n{RULES}\n\n{_context(state)}"
+            f"These are the repository's files on {state['base']} "
             f"(path and size):\n{listing}\n\nPick the files you need to read: the ones you will edit, "
             f"their tests, and anything needed to understand them (at most {code_jobs.MAX_SCOPE_FILES}). "
             "Answer with your approach in three to six short bullets, then one fenced block that "
@@ -262,7 +263,8 @@ class CodeSteps:
         msg = await self.e._agent_turn(
             run,
             run.planner_id,
-            f"Goal: {run.goal}\n\n{RULES}\n\n{task}\n\n{code_jobs.EDIT_FORMAT}\n\nStart with two to "
+            f"Goal: {run.goal}\n\n{RULES}\n\n{_context(state)}"
+            f"{task}\n\n{code_jobs.EDIT_FORMAT}\n\nStart with two to "
             "four sentences on what you changed and why, then the edit blocks."
             + ("\n\n" + "\n\n".join(notes) if notes else "")
             + f"\n\nCurrent files:\n\n{shown}",
@@ -416,7 +418,8 @@ class CodeSteps:
         msg = await self.e._agent_turn(
             run,
             run.critic_id,
-            f"Review {writer}'s code change for this goal: {run.goal}\n\n{RULES}\n\nAutomatic tests: "
+            f"Review {writer}'s code change for this goal: {run.goal}\n\n{RULES}\n\n{_context(state)}"
+            "Automatic tests: "
             f"{ci.get('summary', 'unknown')}\n\nCheck that it meets the goal, is correct, is tested, is "
             "safe (no secrets, no health data, nothing outside the goal) and fits the code around it. "
             "Do not ask for changes that are only taste. If changes are needed, list each one as a "
@@ -529,6 +532,16 @@ class CodeSteps:
             pending_decisions=[question] if pr else [],
         )
         return False
+
+
+def _context(state: dict[str, Any]) -> str:
+    """The discussion that led to this job (the agreed spec or plan), when there was one."""
+    ctx = state.get("context")
+    return (
+        f"Background: the discussion that proposed this job agreed on the following.\n{ctx}\n\n"
+        if ctx
+        else ""
+    )
 
 
 def _summary(text: str) -> str:
