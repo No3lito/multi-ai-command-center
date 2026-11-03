@@ -465,7 +465,7 @@ async def test_collab_messages_do_not_spawn_parallel_replies(fresh_database_url:
                 runs = await room_runs(c, room_id)
                 assert [r["kind"] for r in runs] == ["collab"]
                 calls = await fake_calls(fake)
-                assert calls["anthropic"] + calls["openai"] == 3
+                assert calls["anthropic"] + calls["openai"] == 4  # 3 steps + the decision brief
                 assign = (await c.get(f"/api/rooms/{room_id}/messages")).json()["items"]
                 first = next(m for m in assign if m["kind"] == "task.assign")
                 assert "Create a basic login interface" in first["body"]["text"], "the goal is visible"

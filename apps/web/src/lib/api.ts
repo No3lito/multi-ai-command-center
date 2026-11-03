@@ -11,6 +11,7 @@ import type {
   Run,
   Usage,
   Connection,
+  FilesListing,
 } from "./types";
 
 /** Error with the contract's `{"error": {"code", "message"}}` shape mapped onto it. */
@@ -188,6 +189,8 @@ export const api = {
   getRun: (runId: string, signal?: AbortSignal) => request<Run>(`/api/runs/${enc(runId)}`, { signal }),
   cancelRun: (runId: string) => request<Run>(`/api/runs/${enc(runId)}/cancel`, { method: "POST" }),
 
+  listFiles: (path = "", signal?: AbortSignal) =>
+    request<FilesListing>(`/api/files?path=${encodeURIComponent(path)}`, { signal }),
   listConnections: (signal?: AbortSignal) => request<Connection[]>("/api/connections", { signal }),
   createConnection: (displayName: string, roomIds: string[] = []) =>
     request<Connection>("/api/connections", {

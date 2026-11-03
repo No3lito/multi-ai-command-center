@@ -77,19 +77,20 @@ async def test_design_and_build_through_the_live_code_path(fresh_database_url: s
                 assert run["max_turns"] >= 7
                 done = await wait_run(c, run["id"], within=40)
                 assert done["status"] == "completed", done
-                assert done["turn_count"] == 7
+                assert done["turn_count"] == 8
                 msgs = await run_messages(c, room_id, run["id"])
                 speakers = [m["sender"]["display_name"] for m in msgs if m["kind"] == "chat"]
-                assert speakers == ["Claude", "GPT", "Grok", "Claude", "Grok", "GPT", "Grok"]
+                assert speakers == ["Claude", "GPT", "Grok", "Claude", "Grok", "GPT", "Grok", "Claude"]
                 assigns = [m["body"]["text"] for m in msgs if m["kind"] == "task.assign"]
                 assert assigns[0] == "Step 1 of 7: @Claude, draft the design for: A tip calculator web page"
-                assert assigns[-1].startswith("Step 7 of 7: @Grok, apply @GPT's fix instructions")
+                assert assigns[-2].startswith("Step 7 of 7: @Grok, apply @GPT's fix instructions")
+                assert assigns[-1] == "Wrap-up: @Claude, write the decision brief for the owner."
                 summary = msgs[-1]
                 assert (
                     summary["kind"] == "task.result" and "changed files in step 7" in summary["body"]["text"]
                 )
                 calls = await fake_calls(fake)
-                assert (calls["anthropic"], calls["openai"], calls["xai"]) == (2, 2, 3)
+                assert (calls["anthropic"], calls["openai"], calls["xai"]) == (3, 2, 3)
                 xai = [q["body"] for q in calls["requests"] if q["provider"] == "xai"]
                 assert [b["max_output_tokens"] for b in xai] == [400, 8192, 8192]
                 build_instruction = xai[1]["input"][-1]["content"]
@@ -152,7 +153,7 @@ async def test_approved_build_skips_the_fix_step(world: dict[str, Any]) -> None:
                 .order_by(models.Message.seq)
             )
         ).all()
-    assert done is not None and done.status == "completed" and done.turn_count == 6
+    assert done is not None and done.status == "completed" and done.turn_count == 7
     assert not any(t.startswith("Step 7 of 7") for t in texts)
     assert "GPT approved the build" in texts[-1]
     assert len(adapters["xai"].requests) == 2  # feasibility note and build, no fix

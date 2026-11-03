@@ -195,4 +195,29 @@ describe("CollabForm", () => {
       max_turns: 8,
     });
   });
+
+  it("sends picked attachments and can skip the decision brief", async () => {
+    const user = userEvent.setup();
+    const createRun = vi.fn(async () => run());
+    const listFiles = vi.fn(async () => ({
+      enabled: true,
+      path: "",
+      max_files: 10,
+      max_chars: 300_000,
+      entries: [{ name: "README.md", path: "README.md", type: "file" as const, size: 100, readable: true }],
+    }));
+    render(
+      <CollabForm roomId={ROOM_A} roomAgents={both} createRun={createRun} listFiles={listFiles} onStarted={() => {}} />,
+    );
+    await user.type(screen.getByTestId("collab-goal"), "Review the log");
+    await user.click(await screen.findByTestId("attachments-toggle"));
+    await user.click(await screen.findByTestId("attachment-checkbox"));
+    await user.click(screen.getByTestId("collab-brief"));
+    await user.click(screen.getByTestId("collab-start"));
+    await waitFor(() => expect(createRun).toHaveBeenCalled());
+    expect(createRun).toHaveBeenCalledWith(
+      ROOM_A,
+      expect.objectContaining({ attachments: ["README.md"], brief: false }),
+    );
+  });
 });

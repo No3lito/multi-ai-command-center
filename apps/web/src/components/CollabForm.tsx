@@ -8,11 +8,13 @@ import {
   RUN_MAX_TURNS_DEFAULT,
   isAgentUsable,
   type CreateRunBody,
+  type FilesListing,
   type Principal,
   type Run,
   type RunWorkflow,
 } from "@/lib/types";
 import { agentStatusLabel, type RoomAgent } from "./AgentsPanel";
+import { AttachmentsPicker, type PickedFile } from "./AttachmentsPicker";
 import { ErrorText, PanelSection } from "./PanelSection";
 
 export interface CollabInput {
@@ -64,10 +66,12 @@ interface Props {
    * builder or the worker, never a designer or reviewer. */
   externals?: Principal[];
   createRun: (roomId: string, body: CreateRunBody) => Promise<Run>;
+  /** Lists the owner's shared folder; omit to hide file attachments. */
+  listFiles?: (path?: string, signal?: AbortSignal) => Promise<FilesListing>;
   onStarted: (run: Run) => void;
 }
 
-export function CollabForm({ roomId, roomAgents, externals = [], createRun, onStarted }: Props) {
+export function CollabForm({ roomId, roomAgents, externals = [], createRun, listFiles, onStarted }: Props) {
   const usable = roomAgents.filter((r) => r.agent && isAgentUsable(r.agent));
   const [goal, setGoal] = useState("");
   const [workflowSel, setWorkflowSel] = useState<RunWorkflow | null>(null);
@@ -78,6 +82,8 @@ export function CollabForm({ roomId, roomAgents, externals = [], createRun, onSt
   const [errors, setErrors] = useState<CollabErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [attached, setAttached] = useState<PickedFile[]>([]);
+  const [writeBrief, setWriteBrief] = useState(true);
   const ids = {
     goal: useId(),
     workflow: useId(),
@@ -134,9 +140,12 @@ export function CollabForm({ roomId, roomAgents, externals = [], createRun, onSt
         critic_id: criticId,
         budget_usd: Math.round(Number(budget) * 100) / 100,
         max_turns: RUN_MAX_TURNS_DEFAULT,
+        ...(attached.length > 0 ? { attachments: attached.map((f) => f.path) } : {}),
+        ...(writeBrief ? {} : { brief: false }),
       };
       const run = await createRun(roomId, withWorker ? { ...body, workflow, builder_id: builderId } : body);
       setGoal("");
+      setAttached([]);
       onStarted(run);
     } catch (err) {
       setServerError(isApiError(err) ? err.message : "Could not start the run.");
@@ -246,6 +255,16 @@ export function CollabForm({ roomId, roomAgents, externals = [], createRun, onSt
             {errors.builderId && <ErrorText>{errors.builderId}</ErrorText>}
           </>
         )}
+        {listFiles && <AttachmentsPicker listFiles={listFiles} selected={attached} onChange={setAttached} />}
+        <label className="flex items-center gap-2 text-[11px] text-muted">
+          <input
+            type="checkbox"
+            data-testid="collab-brief"
+            checked={writeBrief}
+            onChange={(e) => setWriteBrief(e.target.checked)}
+          />
+          End with a decision brief (what was decided, what&apos;s waiting on you, next steps)
+        </label>
         <div className="flex items-end gap-2">
           <div className="w-28">
             <label htmlFor={ids.budget} className={labelClass}>

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-Prefix = Literal["msg", "room", "usr", "agt", "ext", "sys", "ses", "run", "res", "tok"]
+Prefix = Literal["msg", "room", "usr", "agt", "ext", "sys", "ses", "run", "res", "tok", "att"]
 
 
 def new_id(prefix: Prefix) -> str:
