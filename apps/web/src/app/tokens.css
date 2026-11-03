@@ -1,4 +1,4 @@
-/* Command Center visual spec v2: the only place for colors, sizes and fonts. Dark is the default. */
+/* Phase 1: light-only dashboard tokens. */
 :root {
   --space-1: 4px;
   --space-2: 8px;
@@ -10,11 +10,11 @@
   --radius-card: 12px;
   --radius-control: 8px;
   --content-max: 1280px;
-  --sidebar-w: 240px;
+  --sidebar-w: 208px;
   --sidebar-w-collapsed: 64px;
   --drawer-w: 280px;
   --chat-measure: 72ch;
-  --motion-fast: 120ms;
+  --motion-fast: 0ms;
 
   --font-sans-stack: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono-stack: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -30,28 +30,37 @@
   --text-label: 12px;
   --lh-label: 16px;
 
-  --accent: #e0679e;
-  --accent-ink: #e0679e;
-  --accent-fg: #14181f;
-  --accent-soft: rgba(224, 103, 158, 0.14);
-  --focus: #e0679e;
-  --ok: #3fb67a;
-  --warn: #e0a43a;
-  --danger: #e5584f;
-  --ok-soft: rgba(63, 182, 122, 0.14);
-  --warn-soft: rgba(224, 164, 58, 0.14);
-  --danger-soft: rgba(229, 88, 79, 0.14);
+  --speaker-owner: #334155;
+  --speaker-claude: #B45309;
+  --speaker-gpt: #0F766E;
+  --speaker-blue: #1D4ED8;
+  --speaker-violet: #6D28D9;
+  --speaker-green: #15803D;
+  --speaker-rose: #BE123C;
+  --speaker-system: #475569;
 
-  --bg: #0f1115;
-  --sidebar: #12151b;
-  --panel: #171a21;
-  --panel-2: #1c2029;
-  --border: #262b36;
-  --text: #e8eaf0;
-  --muted: #9aa3b2;
-  --disabled: #5c6575;
-  --card-shadow: none;
-  color-scheme: dark;
+  --accent: #0F766E;
+  --accent-ink: #115E59;
+  --accent-fg: #FFFFFF;
+  --accent-soft: #E6F3F0;
+  --focus: #1D4ED8;
+  --ok: #166534;
+  --warn: #92400E;
+  --danger: #B91C1C;
+  --ok-soft: #F0FDF4;
+  --warn-soft: #FFFBEB;
+  --danger-soft: #FEF2F2;
+
+  --bg: #F8FAFC;
+  --sidebar: #FFFFFF;
+  --panel: #FFFFFF;
+  --panel-2: #F1F5F9;
+  --border: #CBD5E1;
+  --text: #0F172A;
+  --muted: #475569;
+  --disabled: #64748B;
+  --card-shadow: 0 2px 8px rgb(15 23 42 / 0.06);
+  color-scheme: light;
 }
 
 @media (max-width: 767px) {
@@ -60,16 +69,4 @@
   }
 }
 
-:root[data-theme="light"] {
-  --accent-ink: #b8326f;
-  --bg: #f6f7f9;
-  --sidebar: #ffffff;
-  --panel: #ffffff;
-  --panel-2: #f0f2f5;
-  --border: #e3e6eb;
-  --text: #14181f;
-  --muted: #5a6372;
-  --disabled: #697386;
-  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-  color-scheme: light;
-}
+/* Dark mode is intentionally deferred to Phase 2. */

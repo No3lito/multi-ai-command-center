@@ -5,7 +5,8 @@ import { api, isApiError } from "@/lib/api";
 import { isRunActive, type Agent, type CodeJobs, type Room, type RoomDetail } from "@/lib/types";
 import { useAgents } from "@/lib/useAgents";
 import { useDecisions } from "@/lib/useDecisions";
-import { senderStyle } from "@/lib/senderStyle";
+import { speakerId } from "@/lib/senderStyle";
+import { useSpeakerStyles } from "@/lib/useSpeakerStyles";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { useOutbox } from "@/lib/useOutbox";
 import { useRoomStream } from "@/lib/useRoomStream";
@@ -20,7 +21,7 @@ import { InboxPanel, ProjectPanel, projectTitle } from "./ProjectPanels";
 import { Modal, RightTabs, type TabId } from "./RightTabs";
 import { SummaryPanel, lastSeenFor } from "./SummaryPanel";
 import { CollabForm } from "./CollabForm";
-import { Composer, type MentionAgent } from "./Composer";
+import { Composer, composerDeliveryState, type MentionAgent } from "./Composer";
 import { ConnectionPill } from "./ConnectionPill";
 import { MessageList } from "./MessageList";
 import { RightPanel } from "./RightPanel";
@@ -173,14 +174,18 @@ export function RoomView(props: Props) {
   const roomName = detail.kind === "ready" ? detail.detail.name : (roomSummary?.name ?? "");
   const memberCount = detail.kind === "ready" ? detail.detail.member_count : roomSummary?.member_count;
 
+  const participantStyles = useSpeakerStyles([
+    ...(roomDetail?.members ?? []),
+    ...stream.messages.map((message) => message.sender),
+  ], outbox.pending.length > 0);
   const header = (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
+    <header className="room-header sticky top-0 z-20 flex min-h-16 shrink-0 flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2">
       <button
         type="button"
         onClick={onToggleLeft}
         aria-controls="left-sidebar"
         aria-label="Show rooms"
-        className="rounded-md p-1.5 text-muted hover:bg-panel-2 hover:text-fg lg:hidden"
+        className="rounded-md p-1.5 text-muted hover:bg-panel-2 hover:text-fg md:hidden"
       >
         <MenuIcon />
       </button>
@@ -200,15 +205,6 @@ export function RoomView(props: Props) {
                 className="shrink-0 rounded bg-panel-2 px-1.5 py-px text-[11px] text-muted"
               >
                 Project: {projectTitle(workspace, roomDetail.project_path)}
-              </span>
-            )}
-            {roomDetail && (
-              <span data-testid="room-members" className="flex shrink-0 items-center -space-x-1.5 self-center">
-                {roomDetail.members
-                  .filter((m) => m.kind !== "owner" && m.kind !== "human")
-                  .map((m) => (
-                    <Avatar key={m.id} style={senderStyle(m)} label={m.display_name} size={20} />
-                  ))}
               </span>
             )}
             {memberCount !== undefined && (
@@ -294,8 +290,16 @@ export function RoomView(props: Props) {
           onDiscard={outbox.discard}
           runs={runs.runs}
           onArchive={archiveRun}
+          participants={roomDetail?.members}
+          speakerStyles={participantStyles}
         />
-        <Composer onSend={outbox.send} disabled={detail.kind !== "ready"} roomName={roomName} agents={mentionAgents} />
+        <Composer
+          onSend={outbox.send}
+          disabled={detail.kind !== "ready"}
+          {...composerDeliveryState(outbox.pending)}
+          roomName={roomName}
+          agents={mentionAgents}
+        />
       </>
     );
   }
@@ -304,6 +308,20 @@ export function RoomView(props: Props) {
     <>
       <main className="flex min-w-0 flex-1 flex-col bg-bg">
         {header}
+        {roomDetail && (
+          <ul aria-label="Participants" data-testid="room-members" className="participant-strip">
+            {roomDetail.members.map((member) => (
+              <li key={member.id} className="flex shrink-0 items-center gap-2">
+                <Avatar
+                  style={participantStyles.get(speakerId(member))!}
+                  label={member.display_name}
+                  size={24}
+                />
+                <span>{member.display_name}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         {body}
       </main>
       <RightPanel
@@ -324,15 +342,21 @@ export function RoomView(props: Props) {
             }}
           />
         )}
+        {roomDetail && !notFound && roomId &&
+          (runs.runs.length > 0 || decisions.decisions.length > 0) && (
+            <details open className="task-progress">
+              <summary>Tasks and progress</summary>
+              <SummaryPanel
+                runs={runs.runs}
+                decisions={decisions.decisions}
+                usage={usage.usage}
+                since={lastSeenFor(roomId)}
+                agentName={agentName}
+              />
+            </details>
+          )}
         {roomDetail && !notFound && roomId && tab === "decide" && (
           <div role="tabpanel" id="tabpanel-decide" aria-labelledby="tab-decide">
-            <SummaryPanel
-              runs={runs.runs}
-              decisions={decisions.decisions}
-              usage={usage.usage}
-              since={lastSeenFor(roomId)}
-              agentName={agentName}
-            />
             <DecisionsPanel runs={runs.runs} decisions={decisions.decisions} onAnswer={onAnswer} />
             <InboxPanel workspace={workspace} onFile={fileInbox} />
           </div>

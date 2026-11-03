@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -29,6 +29,32 @@ function htmlAsText() {
 
 const SAFE_URL = /^(https?:|mailto:)/i;
 
+function CodeBlock({ children }: { children: ReactNode }) {
+  const codeRef = useRef<HTMLPreElement>(null);
+  const [status, setStatus] = useState("");
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(codeRef.current?.textContent ?? "");
+      setStatus("Copied");
+    } catch {
+      setStatus("Copy failed. Select the code to copy it.");
+    }
+  }
+  return (
+    <div className="code-block">
+      <div className="flex flex-wrap items-center justify-end gap-2 px-2 py-1">
+        {status && <span role="status" className="text-[13px] text-muted">{status}</span>}
+        <button type="button" onClick={() => void copy()} className="rounded border border-line bg-panel px-2 py-1 text-[13px]">
+          Copy code
+        </button>
+      </div>
+      <pre ref={codeRef} tabIndex={0} aria-label="Code block" className="max-w-full overflow-x-auto p-3 text-[13px]">
+        {children}
+      </pre>
+    </div>
+  );
+}
+
 const components: Components = {
   a: ({ href, children }) =>
     href ? (
@@ -46,7 +72,7 @@ const components: Components = {
       </table>
     </div>
   ),
-  pre: ({ children }) => <pre className="my-1 max-w-full overflow-x-auto rounded bg-bg p-2 text-xs">{children}</pre>,
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   code: ({ children, className }) => (
     <code className={`${className ?? ""} rounded bg-panel-2 px-1 font-mono text-[0.9em]`}>{children}</code>
   ),

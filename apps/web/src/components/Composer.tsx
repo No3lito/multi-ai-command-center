@@ -20,6 +20,8 @@ interface Props {
   /** `mentions` holds the ids of agents whose "@DisplayName" is in the text. */
   onSend: (text: string, mentions: string[]) => void;
   disabled?: boolean;
+  sending?: boolean;
+  deliveryError?: boolean;
   roomName?: string;
   /** Agents in this room that can be mentioned. */
   agents?: readonly MentionAgent[];
@@ -27,11 +29,19 @@ interface Props {
 
 const NO_AGENTS: readonly MentionAgent[] = [];
 
+/** Shared by RoomView and delivery integration tests. Retry stays in the outbox. */
+export function composerDeliveryState(pending: readonly { status: string }[]) {
+  return {
+    sending: pending.some((item) => item.status !== "failed"),
+    deliveryError: pending.some((item) => item.status === "failed"),
+  };
+}
+
 /**
  * Enter sends, Shift+Enter inserts a newline. Send is disabled while empty.
  * Typing "@" opens an autocomplete of room agents (arrows, Enter or Tab to pick, Esc to close).
  */
-export function Composer({ onSend, disabled, roomName, agents = NO_AGENTS }: Props) {
+export function Composer({ onSend, disabled, sending = false, deliveryError = false, roomName, agents = NO_AGENTS }: Props) {
   const [text, setText] = useState("");
   const [query, setQuery] = useState<MentionQuery | null>(null);
   const [active, setActive] = useState(0);
@@ -128,7 +138,11 @@ export function Composer({ onSend, disabled, roomName, agents = NO_AGENTS }: Pro
   const optionId = (i: number) => `${listId}-opt-${i}`;
 
   return (
-    <form onSubmit={onSubmit} className="shrink-0 border-t border-line bg-panel px-3 py-2 sm:px-5">
+    <form
+      onSubmit={onSubmit}
+      data-state={disabled ? "disabled" : deliveryError ? "error" : sending ? "sending" : "default"}
+      className="composer shrink-0 border-t border-line bg-panel px-3 py-4 sm:px-5"
+    >
       <label htmlFor="composer-input" className="sr-only">
         {roomName ? `Message #${roomName}` : "Message"}
       </label>
@@ -181,12 +195,12 @@ export function Composer({ onSend, disabled, roomName, agents = NO_AGENTS }: Pro
             onBlur={() => setQuery(null)}
             onKeyDown={onKeyDown}
             disabled={disabled}
-            placeholder={roomName ? `Message #${roomName}` : "Message"}
+            placeholder="Message the team…"
             aria-describedby={hintId}
             aria-autocomplete="list"
             aria-controls={open ? listId : undefined}
             aria-activedescendant={open ? optionId(activeIndex) : undefined}
-            className="max-h-48 min-h-[1.75rem] flex-1 resize-none bg-transparent py-1 leading-snug outline-none placeholder:text-muted [field-sizing:content] focus-visible:outline-none"
+            className="max-h-48 min-h-[1.75rem] min-w-0 flex-1 resize-none bg-transparent py-1 leading-snug placeholder:text-muted [field-sizing:content]"
           />
           <button
             type="submit"
@@ -198,13 +212,18 @@ export function Composer({ onSend, disabled, roomName, agents = NO_AGENTS }: Pro
           </button>
         </div>
       </div>
-      <p id={hintId} className="mt-1 text-[11px] text-muted">
+      <p role="status" aria-atomic="true" className="mt-2 text-[13px] text-muted">
+        {disabled ? "Messaging unavailable." : deliveryError
+          ? "A message was not sent. Use Retry or Discard on the message above."
+          : sending ? "Sending…" : ""}
+      </p>
+      <p id={hintId} className="mt-1 text-[13px] text-muted">
         {tooLong ? (
           <span className="text-danger">
             Message is too long ({trimmed.length.toLocaleString()} of {MESSAGE_TEXT_MAX.toLocaleString()} characters).
           </span>
         ) : (
-          "Enter to send, Shift+Enter for a new line. Mention an agent with @ to ask it directly."
+          "Message the team… (Enter to send, Shift+Enter for new line). Mention an agent with @ to ask it directly."
         )}
       </p>
     </form>

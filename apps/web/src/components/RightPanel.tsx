@@ -72,7 +72,7 @@ export function RightPanel({ open, detail, status, lastSeq, hasRoom, children, s
       id="right-sidebar"
       aria-label="Room details"
       style={{ "--room-details-width": `${width}px` } as CSSProperties}
-      className={`fixed inset-y-0 right-0 z-40 flex w-80 shrink-0 flex-col overflow-hidden border-l border-line bg-panel transition-transform xl:relative xl:w-[var(--room-details-width)] xl:translate-x-0 ${
+      className={`fixed inset-y-0 right-0 z-40 flex w-[min(320px,100vw)] shrink-0 flex-col overflow-hidden border-l border-line bg-panel xl:relative xl:w-[var(--room-details-width)] xl:translate-x-0 ${
         open ? "translate-x-0" : "invisible translate-x-full xl:visible"
       }`}
     >
@@ -87,7 +87,7 @@ export function RightPanel({ open, detail, status, lastSeq, hasRoom, children, s
           aria-valuenow={width}
           aria-valuetext={`${width} pixels`}
           tabIndex={0}
-          className="group absolute inset-y-0 left-0 z-10 hidden w-2 touch-none cursor-col-resize select-none outline-none xl:block"
+          className="group absolute inset-y-0 left-0 z-10 hidden w-2 touch-none cursor-col-resize select-none xl:block"
           onPointerDown={(event) => {
             if (event.button !== 0 || window.innerWidth < DESKTOP_WIDTH) return;
             event.preventDefault();

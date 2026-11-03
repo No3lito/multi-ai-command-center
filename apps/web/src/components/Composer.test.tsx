@@ -5,7 +5,7 @@ import { ApiError } from "@/lib/api";
 import type { Message } from "@/lib/types";
 import { useOutbox } from "@/lib/useOutbox";
 import { ROOM_A, msg } from "@/test/fakeWebSocket";
-import { Composer } from "./Composer";
+import { Composer, composerDeliveryState } from "./Composer";
 import { MessageList } from "./MessageList";
 
 describe("Composer", () => {
@@ -42,6 +42,19 @@ describe("Composer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("reports disabled, sending, and delivery-error states without replacing outbox retry", () => {
+    const { container, rerender } = render(<Composer onSend={() => {}} disabled />);
+    expect(container.querySelector("form")).toHaveAttribute("data-state", "disabled");
+    expect(screen.getByTestId("composer-input")).toBeDisabled();
+    rerender(<Composer onSend={() => {}} sending />);
+    expect(container.querySelector("form")).toHaveAttribute("data-state", "sending");
+    expect(screen.getByRole("status")).toHaveTextContent("Sending…");
+    rerender(<Composer onSend={() => {}} deliveryError />);
+    expect(container.querySelector("form")).toHaveAttribute("data-state", "error");
+    expect(screen.getByRole("status")).toHaveTextContent("Use Retry or Discard");
+    expect(screen.getByText(/Message the team… \(Enter to send/)).toBeInTheDocument();
+  });
+
   it("has an accessible label", () => {
     render(<Composer onSend={() => {}} roomName="General" />);
     expect(screen.getByLabelText("Message #General")).toBe(screen.getByTestId("composer-input"));
@@ -53,7 +66,7 @@ function Harness({ postMessage, delivered }: { postMessage: (r: string, t: strin
   return (
     <>
       <MessageList messages={[]} pending={outbox.pending} loading={false} onRetry={outbox.retry} onDiscard={outbox.discard} />
-      <Composer onSend={outbox.send} />
+      <Composer onSend={outbox.send} {...composerDeliveryState(outbox.pending)} />
     </>
   );
 }
@@ -77,6 +90,8 @@ describe("Composer with outbox", () => {
     const failed = await screen.findByText("Not sent");
     expect(failed).toBeInTheDocument();
     expect(screen.getByTestId("message-item")).toHaveAttribute("data-pending", "failed");
+    expect(screen.getByRole("status")).toHaveTextContent("Use Retry or Discard");
+    expect(screen.getByTestId("message-item")).toHaveClass("speaker-card", "speaker-owner");
 
     await act(async () => {
       await user.click(screen.getByRole("button", { name: "Retry" }));
@@ -87,6 +102,36 @@ describe("Composer with outbox", () => {
     expect(keys[1]).toBe(keys[0]);
     await waitFor(() => expect(screen.queryByTestId("message-item")).toBeNull());
     expect(delivered.map((m) => m.id)).toEqual([msg(1).id]);
+  });
+
+  it("derives sending from the outbox and clears it after delivery", async () => {
+    const user = userEvent.setup();
+    let resolvePost!: (message: Message) => void;
+    const postMessage = vi.fn(() => new Promise<Message>((resolve) => {
+      resolvePost = resolve;
+    }));
+    render(<Harness postMessage={postMessage} delivered={[]} />);
+    await user.type(screen.getByTestId("composer-input"), "hello{Enter}");
+    expect(screen.getByRole("status")).toHaveTextContent("Sending…");
+    expect(screen.getByTestId("composer-input").closest("form")).toHaveAttribute("data-state", "sending");
+
+    await act(async () => {
+      resolvePost(msg(1, ROOM_A, "hello"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("composer-input").closest("form")).toHaveAttribute("data-state", "default");
+    });
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  });
+
+  it("keeps one composer live region through state changes", () => {
+    const { rerender } = render(<Composer onSend={() => {}} />);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    rerender(<Composer onSend={() => {}} sending />);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    rerender(<Composer onSend={() => {}} deliveryError />);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
   });
 
   it("uses a fresh idempotency key for each new message", async () => {
