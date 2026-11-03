@@ -52,7 +52,7 @@ describe("Composer", () => {
     rerender(<Composer onSend={() => {}} deliveryError />);
     expect(container.querySelector("form")).toHaveAttribute("data-state", "error");
     expect(screen.getByRole("status")).toHaveTextContent("Use Retry or Discard");
-    expect(screen.getByText(/Message the team… \(Enter to send/)).toBeInTheDocument();
+    expect(screen.getByText(/Enter to send, Shift\+Enter for a new line\./)).toBeInTheDocument();
   });
 
   it("has an accessible label", () => {

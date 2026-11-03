@@ -19,7 +19,7 @@ function setup() {
 describe("Composer mentions", () => {
   it("shows the hint", () => {
     setup();
-    expect(screen.getByText(/Mention an agent with @ to ask it directly\./)).toBeInTheDocument();
+    expect(screen.getByText(/Claude will reply\./)).toBeInTheDocument();
   });
 
   it("opens an autocomplete on @ and filters as you type", async () => {
@@ -59,6 +59,7 @@ describe("Composer mentions", () => {
 
   it("drops a mention whose @DisplayName was removed from the text, and matches case-insensitively", async () => {
     const { user, input, onSend } = setup();
+    await user.click(screen.getByRole("button", { name: "No one (note)" }));
     await user.type(input, "@Cl");
     await user.keyboard("{Enter}");
     await user.clear(input);
@@ -73,5 +74,41 @@ describe("Composer mentions", () => {
     await user.type(input, "@");
     await user.click(screen.getAllByTestId("mention-option")[1]!);
     expect(input).toHaveValue("@GPT ");
+  });
+});
+
+describe("Send to", () => {
+  it("sends to Claude by default, so a plain message gets an answer", async () => {
+    window.localStorage.clear();
+    const { user, input, onSend } = setup();
+    expect(screen.getByRole("button", { name: "Claude" })).toHaveAttribute("aria-pressed", "true");
+    await user.type(input, "what do you think?{Enter}");
+    expect(onSend).toHaveBeenCalledWith("what do you think?", [CLAUDE_ID]);
+  });
+
+  it("sends to the agent picked, to everyone, or to no one, and remembers the choice", async () => {
+    window.localStorage.clear();
+    const { user, input, onSend } = setup();
+    await user.click(screen.getByRole("button", { name: "GPT" }));
+    expect(input).toHaveAttribute("placeholder", "Message GPT…");
+    await user.type(input, "one{Enter}");
+    expect(onSend).toHaveBeenLastCalledWith("one", [GPT_ID]);
+    await user.click(screen.getByRole("button", { name: "Everyone" }));
+    await user.type(input, "two{Enter}");
+    expect(onSend).toHaveBeenLastCalledWith("two", [CLAUDE_ID, GPT_ID]);
+    await user.click(screen.getByRole("button", { name: "No one (note)" }));
+    expect(screen.getByText(/Nobody replies to a note\./)).toBeInTheDocument();
+    await user.type(input, "three{Enter}");
+    expect(onSend).toHaveBeenLastCalledWith("three", []);
+    expect(window.localStorage.getItem("composer-send-to")).toBe("none");
+  });
+
+  it("still adds an agent @mentioned in the text", async () => {
+    window.localStorage.clear();
+    const { user, input, onSend } = setup();
+    await user.type(input, "@GP");
+    await user.keyboard("{Enter}");
+    await user.type(input, "and you{Enter}");
+    expect(onSend).toHaveBeenLastCalledWith("@GPT and you", [CLAUDE_ID, GPT_ID]);
   });
 });
