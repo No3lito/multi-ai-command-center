@@ -122,11 +122,13 @@ async def test_tokens_rooms_and_revocation(sim_srv: Server) -> None:
                 "read_messages",
                 "post_message",
                 "get_tasks",
+                "get_decisions",
                 "submit_task",
             }
             me = await call(client, "whoami")
             assert me["name"] == "Grok Bot" and [r["name"] for r in me["rooms"]] == ["General"]
             general = me["rooms"][0]["id"]
+            assert await call(client, "get_decisions", room_id=general) == []
             posted = await call(client, "post_message", room_id=general, text="Hello from Grok Bot")
             read = await call(client, "read_messages", room_id=general, after_seq=0)
             mine = [m for m in read["messages"] if m["id"] == posted["id"]]
@@ -250,7 +252,7 @@ async def test_review_with_grok_bot_over_mcp(fresh_database_url: str, tmp_path: 
                     "every reviewer step carries the rule"
                 )
                 anthropic_bodies = [q["body"] for q in calls["requests"] if q["provider"] == "anthropic"]
-                assert [b["max_tokens"] for b in anthropic_bodies] == [12_000, 12_000, 6_000], "room to think"
+                assert [b["max_tokens"] for b in anthropic_bodies] == [12_000, 12_000, 8_000], "room to think"
                 assert all(b["output_config"] == {"effort": "medium"} for b in anthropic_bodies)
 
 

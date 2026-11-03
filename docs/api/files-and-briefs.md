@@ -22,4 +22,5 @@ Every collaboration, design & build and review run ends with a **brief** step, u
 - The brief is a normal chat message in the room. It is also stored as `Run.brief`.
 - The "Waiting on you" items are parsed into `Run.pending_decisions`, an empty list when there are none.
 - The dashboard's **Decisions** panel shows the latest bottom line, what is waiting on the owner, and every earlier brief.
-- Output limit: 6,000 tokens, including Claude's thinking. Each brief typically costs a few cents.
+- Output limit: 8,000 tokens, including Claude's thinking (raised from 6,000 so the decisions block fits). Each brief typically costs a few cents.
+- Each "Waiting on you" item also becomes a decision card the owner answers with one click: see [`decisions.md`](decisions.md).

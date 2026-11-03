@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, isApiError } from "@/lib/api";
 import type { Agent, Room, RoomDetail } from "@/lib/types";
 import { useAgents } from "@/lib/useAgents";
+import { useDecisions } from "@/lib/useDecisions";
 import { useOutbox } from "@/lib/useOutbox";
 import { useRoomStream } from "@/lib/useRoomStream";
 import { useRuns } from "@/lib/useRuns";
@@ -46,6 +47,17 @@ export function RoomView(props: Props) {
   const agentsHook = useAgents();
   const runs = useRuns(detail.kind === "ready" ? roomId : null, stream.messages, streamReady);
   const usage = useUsage(stream.messages, streamReady);
+  const decisions = useDecisions(detail.kind === "ready" ? roomId : null, runs.runs);
+  const { answer: answerDecision } = decisions;
+  const { addRun } = runs;
+  const onAnswer = useCallback(
+    async (id: string, body: Parameters<typeof answerDecision>[1]) => {
+      const result = await answerDecision(id, body);
+      if (result.follow_up_run) addRun(result.follow_up_run);
+      return result;
+    },
+    [answerDecision, addRun],
+  );
   const roomDetail = detail.kind === "ready" ? detail.detail : null;
 
   const { roomAgents, otherAgents } = useMemo(
@@ -230,7 +242,9 @@ export function RoomView(props: Props) {
         lastSeq={stream.lastSeq}
         hasRoom={!!roomId && !notFound}
       >
-        {roomDetail && !notFound && <DecisionsPanel runs={runs.runs} />}
+        {roomDetail && !notFound && (
+          <DecisionsPanel runs={runs.runs} decisions={decisions.decisions} onAnswer={onAnswer} />
+        )}
         <AgentsPanel
           hasRoom={!!roomDetail && !notFound}
           loading={agentsHook.state.kind === "loading"}

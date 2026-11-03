@@ -2,7 +2,22 @@
 
 Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
 
-## Attached files and decision briefs (in review, branch `agent/claude/files-and-briefs`)
+## Decision cards (in review, branch `agent/claude/decision-cards`)
+
+- Every "Waiting on you" item in a brief becomes a card on the dashboard, with **Approve**, **Need more info**, **Decline** and **Dismiss** buttons, an optional note, and a budget.
+- Approving (or asking for more info) starts the follow-up run the agents already prepared, at once. Grok Bot sees every answer in the room and through the new `get_decisions` MCP tool.
+
+Contract: [`docs/api/decisions.md`](api/decisions.md).
+
+Evidence:
+
+- Backend (fake providers): block parsing, storing decisions, fallback from bullets, worker fallback, and the full API flow. That flow covers approve with a note and budget, a follow-up run that completes, decline, answering twice (409), sign-in required (401), and Coordinator messages.
+- Dashboard tests for the cards and the hook.
+- A simulated browser test that approves a card.
+
+**Not yet verified with real models.**
+
+## Attached files and decision briefs (merged in PR #7)
 
 - **Attached files:** Claude and GPT can read owner-chosen files from one folder, mounted read-only. Files are snapshotted when a run starts.
 - **Decision briefs:** every run ends with a fixed-format brief (bottom line, decided, done, waiting on you, next steps, open risks). A Decisions panel shows the latest conclusion and the open decisions.
@@ -20,7 +35,7 @@ Evidence:
 - It checked them against the agreed plan.
 - It ended with a decision brief. The Decisions panel showed the bottom line and three "Waiting on you" items.
 
-## Grok Bot bridge (in review, branch `agent/claude/grok-bot-bridge`)
+## Grok Bot bridge (merged in PR #6)
 
 The owner's Grok Bot (xAI's hosted agent app, with its own sub-agents and work) joins the Command Center over MCP. Its first job is a **Review & improve** run: Grok Bot shares its work, Claude and GPT review it and write a plan of fixes and new ideas, and Grok Bot responds. Contract and setup: [`docs/api/bridge.md`](api/bridge.md).
 
@@ -42,7 +57,7 @@ Found and fixed during the first attempts:
 - Claude 5.5's thinking used up the 2,048-token output limit. Claude now runs at medium effort, with 12,000 tokens for review and design steps.
 - Run summaries repeated very long goals. They now show the goal's first line.
 
-## Grok agent and design & build workflow (in review, PR #5)
+## Grok agent and design & build workflow (merged in PR #5)
 
 Branch: `agent/claude/grok-agent`.
 

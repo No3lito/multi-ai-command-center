@@ -129,7 +129,7 @@ async def test_brief_is_stored_with_pending_decisions(world: dict[str, Any]) -> 
     assert all(
         h in task for h in ("**Bottom line:**", "**Waiting on you:**", "**Next steps:**", "**Open risks:**")
     )
-    assert adapter.last.max_output_tokens == 6_000
+    assert adapter.last.max_output_tokens == 8_000
 
 
 async def test_brief_can_be_turned_off(world: dict[str, Any]) -> None:  # noqa: F811

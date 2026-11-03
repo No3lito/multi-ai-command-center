@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, Query, Request
 from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from command_center import decisions as decisions_mod
 from command_center import files
 from command_center.config import Settings
 from command_center.db import models
@@ -24,8 +25,12 @@ from command_center.protocol import (
     ConnectionIn,
     ConnectionOut,
     ConnectionRoom,
+    DecisionAnswerIn,
+    DecisionAnswerOut,
+    DecisionOut,
     FileEntryOut,
     FilesOut,
+    FollowUpPlanOut,
     MemberIn,
     PriceOut,
     RoomDetailOut,
@@ -159,6 +164,51 @@ def run_out(r: models.Run, attachments: list[AttachmentOut] | None = None) -> Ru
         updated_at=r.updated_at,
         finished_at=r.finished_at,
     )
+
+
+def _plan(raw: Any) -> FollowUpPlanOut:
+    raw = raw if isinstance(raw, dict) else {}
+    return FollowUpPlanOut(
+        workflow=str(raw.get("workflow") or "none"),
+        worker=raw.get("worker") or None,
+        goal=str(raw.get("goal") or ""),
+    )
+
+
+def decision_out(d: models.Decision, run_goal: str) -> DecisionOut:
+    follow = d.follow_up or {}
+    more = dict(follow.get("on_more_info") or {})
+    more.setdefault("workflow", "collab")
+    return DecisionOut(
+        id=d.id,
+        room_id=d.room_id,
+        run_id=d.run_id,
+        run_goal=run_goal.split("\n")[0][:300],
+        question=d.question,
+        recommendation=d.recommendation,
+        cost=d.cost,
+        on_approve=_plan(follow.get("on_approve")),
+        on_more_info=_plan(more),
+        status=d.status,
+        owner_note=d.owner_note,
+        decided_at=d.decided_at,
+        follow_up_run_id=d.follow_up_run_id,
+        created_at=d.created_at,
+    )
+
+
+ANSWER_STATUS = {
+    "approve": "approved",
+    "decline": "declined",
+    "more_info": "more_info",
+    "dismiss": "dismissed",
+}
+ANSWER_WORDS = {
+    "approve": "APPROVED",
+    "decline": "DECLINED",
+    "more_info": "asked for MORE INFORMATION on",
+    "dismiss": "dismissed (no longer relevant)",
+}
 
 
 def register(
@@ -484,6 +534,119 @@ def register(
         if cancelled:
             await audit(session, "run.cancel", principal.id, run.id, request, cancelled=cancelled)
         return run_out(run)
+
+    # ------------------------------------------------------------ decisions
+
+    @app.get("/api/rooms/{room_id}/decisions", response_model=list[DecisionOut])
+    async def list_decisions(
+        room_id: str,
+        principal: PrincipalDep,
+        session: SessionDep,
+        status: Annotated[str | None, Query(pattern="^(pending|decided|all)$")] = "all",
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ) -> list[DecisionOut]:
+        """Decisions raised by this room's decision briefs: pending first, then newest decided."""
+        await member_room(session, room_id, principal)
+        stmt = (
+            select(models.Decision, models.Run.goal)
+            .join(models.Run, models.Run.id == models.Decision.run_id)
+            .where(models.Decision.room_id == room_id)
+        )
+        if status == "pending":
+            stmt = stmt.where(models.Decision.status == "pending")
+        elif status == "decided":
+            stmt = stmt.where(models.Decision.status != "pending")
+        stmt = stmt.order_by(
+            case((models.Decision.status == "pending", 0), else_=1),
+            models.Decision.created_at.desc(),
+            models.Decision.position,
+        ).limit(limit)
+        return [decision_out(d, goal) for d, goal in (await session.execute(stmt)).all()]
+
+    @app.post("/api/decisions/{decision_id}/answer", response_model=DecisionAnswerOut)
+    async def answer_decision(
+        decision_id: str,
+        body: DecisionAnswerIn,
+        request: Request,
+        principal: PrincipalDep,
+        session: SessionDep,
+    ) -> DecisionAnswerOut:
+        """Owner answers a decision. Approve or more info starts the run the agents prepared."""
+        require_owner(principal)
+        decision = await session.get(models.Decision, decision_id, with_for_update=True)
+        if decision is None:
+            raise api_error(404, "decision_not_found", "Decision not found")
+        await member_room(session, decision.room_id, principal)
+        if decision.status != "pending":
+            raise api_error(409, "decision_already_answered", f"This decision was already {decision.status}")
+        note = (body.note or "").strip() or None
+        follow_up: models.Run | None = None
+        if body.answer in ("approve", "more_info"):
+            try:
+                follow_up = await decisions_mod.start_follow_up(
+                    session,
+                    settings,
+                    decision,
+                    answer=body.answer,
+                    note=note,
+                    owner_id=principal.id,
+                    budget_usd=Decimal(str(body.budget_usd)) if body.budget_usd is not None else None,
+                )
+            except decisions_mod.FollowUpError as exc:
+                raise api_error(409, "follow_up_failed", exc.message) from exc
+        decision.status = ANSWER_STATUS[body.answer]
+        decision.owner_note = note
+        decision.decided_by = principal.id
+        decision.decided_at = func.now()
+        decision.follow_up_run_id = follow_up.id if follow_up is not None else None
+        await session.commit()
+        await session.refresh(decision)
+        if follow_up is not None:
+            await session.refresh(follow_up)
+        source_goal = (
+            await session.scalar(select(models.Run.goal).where(models.Run.id == decision.run_id)) or ""
+        )
+
+        # Tell the room, so every agent (Grok Bot included, via read_messages) sees the answer.
+        coordinator = await session.scalar(
+            select(models.Principal).where(
+                models.Principal.kind == "system", models.Principal.display_name == "Coordinator"
+            )
+        )
+        if coordinator is not None:
+            text = f"Owner {ANSWER_WORDS[body.answer]}: {decision.question}"
+            if note:
+                text += f"\nNote: {note}"
+            if follow_up is not None:
+                text += f"\nStarted a {follow_up.kind} run (budget ${float(follow_up.budget_usd):.2f})."
+            await service.append_message(
+                session,
+                decision.room_id,
+                coordinator,
+                kind="chat",
+                text=text,
+                idempotency_key=f"decision:{decision.id}",
+                data={"decision_id": decision.id, "answer": body.answer},
+                correlation_id=follow_up.id if follow_up is not None else decision.run_id,
+            )
+        await audit(
+            session,
+            "decision.answer",
+            principal.id,
+            decision.id,
+            request,
+            answer=body.answer,
+            follow_up_run_id=decision.follow_up_run_id,
+        )
+        if follow_up is not None:
+            wake()
+        run_attachments = (
+            (await attachments_for(session, [follow_up.id])).get(follow_up.id) if follow_up else None
+        )
+        return DecisionAnswerOut(
+            decision=decision_out(decision, source_goal),
+            follow_up_run=run_out(follow_up, run_attachments) if follow_up is not None else None,
+        )
 
     # ------------------------------------------------------------ connections (external agents)
 

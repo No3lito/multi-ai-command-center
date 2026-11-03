@@ -29,6 +29,17 @@ class SimulatedAdapter:
             f"[Simulated response, no AI model was called] {self.persona} acknowledges the task: "
             f'"{instruction}". Reference {digest}.'
         )
+        if "```decisions" in task:
+            # A decision brief: one clearly labelled example, so decision cards can be tried
+            # without paying for a model. Approving it starts nothing.
+            text += (
+                "\n**Waiting on you:**\n- [Simulated] Example decision: approve this to try the buttons.\n"
+                '```decisions\n[{"question": '
+                '"[Simulated] Example decision: approve this to try the buttons.", '
+                '"recommendation": "Approve: nothing runs, it only records your answer.", "cost": "none", '
+                '"on_approve": {"workflow": "none", "worker": null, "goal": "", "attachments": []}, '
+                '"on_more_info": {"workflow": "none", "worker": null, "goal": ""}}]\n```'
+            )
         return ChatResponse(
             text=text,
             input_tokens=max(1, req.prompt_chars() // 4),
