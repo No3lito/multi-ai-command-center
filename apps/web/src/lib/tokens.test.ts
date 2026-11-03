@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { senderStyle } from "./senderStyle";
 
-const css = readFileSync(new URL("../app/tokens.css", import.meta.url), "utf8");
+// vitest runs from apps/web; import.meta.url is not a file: URL under jsdom.
+const css = readFileSync(resolve(process.cwd(), "src/app/tokens.css"), "utf8");
 
 function section(start: string): string {
   const i = css.indexOf(start);
@@ -40,7 +42,7 @@ describe("tokens.css", () => {
     expect(css).toMatch(/--lh-body: 24px/);
     expect(token(dark, "--bg")).toBe("#0f1115");
     expect(token(light, "--panel-2")).toBe("#f0f2f5");
-    expect(token(dark, "--accent")).toBe("#5b8def");
+    expect(token(dark, "--accent")).toBe("#e0679e");
   });
 
   it("keeps the light theme identical for the media query and the data attribute", () => {
@@ -69,6 +71,39 @@ describe("tokens.css", () => {
       const color = senderStyle({ kind: "agent", display_name: who }).color;
       expect(contrast(color, token(dark, "--panel")), who).toBeGreaterThanOrEqual(3);
     }
+  });
+
+  it("keeps the accent at least 40 degrees of hue away from every sender color", () => {
+    const hue = (hex: string): number | null => {
+      const n = parseInt(hex.slice(1), 16);
+      const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      if (max - min < 30) return null; // greys carry no hue
+      const d = max - min;
+      const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return (h * 60 + 360) % 360;
+    };
+    const accentHue = hue(token(dark, "--accent"))!;
+    const senders = [
+      { kind: "agent", display_name: "Claude" },
+      { kind: "agent", display_name: "GPT" },
+      { kind: "agent", display_name: "Grok" },
+      { kind: "external", display_name: "Grok Bot" },
+      { kind: "system", display_name: "Coordinator" },
+      { kind: "owner", display_name: "Noel" },
+      { kind: "agent", display_name: "Other" },
+    ];
+    for (const s of senders) {
+      const h = hue(senderStyle(s).color);
+      if (h === null) continue;
+      const diff = Math.abs(h - accentHue);
+      expect(Math.min(diff, 360 - diff), s.display_name).toBeGreaterThanOrEqual(40);
+    }
+  });
+
+  it("keeps the light accent ink readable on the page background too", () => {
+    expect(contrast(token(light, "--accent-ink"), token(light, "--bg"))).toBeGreaterThanOrEqual(4.5);
   });
 
   it("leaves agent colors unchanged", () => {
