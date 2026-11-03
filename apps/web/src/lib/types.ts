@@ -48,6 +48,14 @@ export interface WorkspaceInfo {
   inbox: InboxItem[];
 }
 
+export interface FileSuggestions {
+  project_path: string | null;
+  /** Attached to every run in this project room: card, family page, owner rules. */
+  always: string[];
+  /** Files matching the goal's words, best first (free keyword match, no AI). */
+  suggested: { path: string; size: number | null; matched: string[] }[];
+}
+
 export interface NewProject {
   family: string;
   name: string;

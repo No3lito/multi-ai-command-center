@@ -249,3 +249,47 @@ describe("CollabForm in a project room", () => {
     expect(screen.queryByTestId("collab-agent-files-box")).not.toBeInTheDocument();
   });
 });
+
+describe("CollabForm file suggestions", () => {
+  const listing = { enabled: true, path: "", entries: [], max_files: 10, max_chars: 300_000 };
+  const P = "01-PROJECTS/trading/meme-coin-strategy";
+
+  it("pre-selects files matching the goal, keeps removals removed, and sends them with the run", async () => {
+    const user = userEvent.setup();
+    const suggestFiles = vi.fn(async () => ({
+      project_path: P,
+      always: [`${P}/PROJECT.md`, "02-REFERENCE/owner-rules.md"],
+      suggested: [
+        { path: `${P}/sources/trading-review/HYPOTHESIS-REVIEW.md`, size: 2048, matched: ["hypothesis"] },
+        { path: `${P}/sources/trading-review/FROZEN-SPECS.md`, size: 1024, matched: ["h123"] },
+      ],
+    }));
+    const createRun = vi.fn(async () => run());
+    render(
+      <CollabForm
+        roomId={ROOM_A}
+        roomAgents={both}
+        createRun={createRun}
+        onStarted={() => {}}
+        listFiles={vi.fn(async () => listing)}
+        projectTitle="Meme coin strategy"
+        suggestFiles={suggestFiles}
+        suggestDelayMs={0}
+      />,
+    );
+    await user.type(screen.getByTestId("collab-goal"), "Check hypothesis H123");
+    await waitFor(() => expect(screen.getAllByTestId("attachment-chip")).toHaveLength(2));
+    expect(screen.getByTestId("collab-always")).toHaveTextContent("Always included: PROJECT.md, owner-rules.md");
+    expect(screen.getAllByTestId("attachment-chip")[0]).toHaveAttribute("data-suggested", "true");
+    await user.click(screen.getAllByTestId("attachment-remove")[1]!);
+    await user.type(screen.getByTestId("collab-goal"), " again");
+    await waitFor(() => expect(suggestFiles.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.getAllByTestId("attachment-chip")).toHaveLength(1);
+    await user.click(screen.getByTestId("collab-start"));
+    await waitFor(() => expect(createRun).toHaveBeenCalled());
+    expect(createRun).toHaveBeenCalledWith(
+      ROOM_A,
+      expect.objectContaining({ attachments: [`${P}/sources/trading-review/HYPOTHESIS-REVIEW.md`] }),
+    );
+  });
+});

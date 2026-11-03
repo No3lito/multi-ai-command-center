@@ -5,6 +5,7 @@ import type {
   Decision,
   DecisionAnswerBody,
   DecisionAnswerResult,
+  FileSuggestions,
   HistoryResult,
   NewProject,
   WorkspaceInfo,
@@ -158,6 +159,10 @@ export const api = {
     request<RoomDetail>(`/api/rooms/${enc(roomId)}/project`, {
       method: "PUT",
       body: { project_path: projectPath },
+    }),
+  suggestFiles: (roomId: string, goal: string, signal?: AbortSignal) =>
+    request<FileSuggestions>(`/api/rooms/${enc(roomId)}/suggest-files?goal=${encodeURIComponent(goal)}`, {
+      signal,
     }),
   getWorkspace: (signal?: AbortSignal) => request<WorkspaceInfo>("/api/workspace", { signal }),
   fileInboxItem: (name: string, projectPath: string) =>

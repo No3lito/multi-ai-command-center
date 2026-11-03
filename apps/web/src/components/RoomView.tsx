@@ -373,6 +373,9 @@ export function RoomView(props: Props) {
             createRun={api.createRun}
             listFiles={api.listFiles}
             projectTitle={projectTitle(workspace, roomDetail.project_path)}
+            suggestFiles={
+              roomDetail.project_path ? (goal, signal) => api.suggestFiles(roomId, goal, signal) : undefined
+            }
             onStarted={(run) => {
               addRun(run);
               setGoalOpen(false);

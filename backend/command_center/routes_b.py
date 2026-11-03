@@ -32,6 +32,7 @@ from command_center.protocol import (
     DecisionOut,
     FileEntryOut,
     FilesOut,
+    FileSuggestionsOut,
     FollowUpPlanOut,
     HistoryOut,
     InboxFileIn,
@@ -44,6 +45,7 @@ from command_center.protocol import (
     RoomProjectIn,
     RunCreateIn,
     RunOut,
+    SuggestedFileOut,
     UsageOut,
     UsageRow,
     WorkspaceOut,
@@ -620,6 +622,27 @@ def register(
             raise api_error(422, "validation_error", f"project: {exc}") from exc
         await audit(session, "project.create", principal.id, project.path, request)
         return project_out(project)
+
+    @app.get("/api/rooms/{room_id}/suggest-files", response_model=FileSuggestionsOut)
+    async def suggest_files(
+        room_id: str,
+        principal: PrincipalDep,
+        session: SessionDep,
+        goal: Annotated[str, Query(max_length=4000)] = "",
+    ) -> FileSuggestionsOut:
+        """Files in the room's project that match the goal's words (free keyword match, no AI)."""
+        require_owner(principal)
+        room = await member_room(session, room_id, principal)
+        ws = open_workspace(settings.files_root, settings.sources_root)
+        project = ws.project(room.project_path) if ws is not None and room.project_path else None
+        if ws is None or project is None:
+            return FileSuggestionsOut(project_path=None, always=[], suggested=[])
+        hits = ws.suggest(project.path, goal)
+        return FileSuggestionsOut(
+            project_path=project.path,
+            always=project_files.context_paths(ws, project),
+            suggested=[SuggestedFileOut(path=e.path, size=e.size, matched=m) for e, _, m in hits],
+        )
 
     @app.put("/api/rooms/{room_id}/project", response_model=RoomDetailOut)
     async def set_room_project(

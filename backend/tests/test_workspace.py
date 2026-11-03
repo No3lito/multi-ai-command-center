@@ -110,6 +110,16 @@ def test_tree_for_agents_skips_logs_and_vendor_folders(layout: tuple[Path, Path]
     assert not any("/logs/" in p or "node_modules" in p for p in paths)
 
 
+def test_suggestions_match_goal_words_against_names_and_contents(layout: tuple[Path, Path]) -> None:
+    root, sources = layout
+    ws = Workspace(root, sources)
+    hits = ws.suggest(MEME, "Check the hypothesis notes for H123")
+    assert hits[0][0].path == f"{MEME}/sources/trading-review/HYPOTHESIS-REVIEW.md"
+    assert set(hits[0][2]) == {"hypothesis", "h123"}
+    assert all("logs" not in e.path and e.path != f"{MEME}/PROJECT.md" for e, _, _ in hits)
+    assert ws.suggest(MEME, "please review the project") == [], "stop words alone match nothing"
+
+
 def test_projects_create_and_index(layout: tuple[Path, Path]) -> None:
     root, sources = layout
     ws = Workspace(root, sources)
@@ -211,6 +221,14 @@ async def test_project_rooms_read_pick_and_save(
                 linked = await c.put(f"/api/rooms/{general}/project", json={"project_path": MEME})
                 assert linked.json()["project_path"] == MEME
                 assert (await c.put(f"/api/rooms/{general}/project", json={})).json()["project_path"] is None
+
+                sugg = (
+                    await c.get(f"/api/rooms/{room['id']}/suggest-files", params={"goal": "hypothesis H123"})
+                ).json()
+                assert sugg["suggested"][0]["path"] == f"{MEME}/sources/trading-review/HYPOTHESIS-REVIEW.md"
+                assert (
+                    f"{MEME}/PROJECT.md" in sugg["always"] and "02-REFERENCE/owner-rules.md" in sugg["always"]
+                )
 
                 # The owner browses linked sources like any folder.
                 listing = (

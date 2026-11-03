@@ -234,6 +234,19 @@ class WorkspaceOut(Strict):
     inbox: list[InboxItemOut]
 
 
+class SuggestedFileOut(Strict):
+    path: str
+    size: int | None
+    matched: list[str]
+
+
+class FileSuggestionsOut(Strict):
+    project_path: str | None
+    # Attached to every run in this project room (card, family page, owner rules).
+    always: list[str]
+    suggested: list[SuggestedFileOut]
+
+
 class RoomProjectIn(Strict):
     project_path: str | None = Field(default=None, max_length=300)
 

@@ -59,6 +59,10 @@ The owner's work lives in one folder, the workspace (for example `C:\Users\noelm
 - `POST /api/rooms` takes an optional `project_path` (link an existing project) or `new_project: {family, name, goal?}` (create one), but not both.
 - `PUT /api/rooms/{id}/project` with `{project_path | null}` links or unlinks a room.
 - `POST /api/workspace/inbox/file` with `{name, project_path}` moves an inbox file to `<project>/notes/`.
+- `GET /api/rooms/{id}/suggest-files?goal=` returns `{project_path, always, suggested: [{path, size, matched}]}`.
+  - `always` lists what every run attaches: the project card, the family page and the owner's rules.
+  - `suggested` holds up to 6 files whose names (weight 3) or first 4 KB (weight 1) match the goal's words; common words are ignored.
+  - No AI is called. The New goal form pre-checks these as the owner types, the owner removes or adds files, and the lead agent can still pick more when the run starts.
 - `GET /api/files?path=` browses the workspace, including linked sources. Attachments take workspace paths.
 - `RoomOut.project_path`, `RunCreateIn.agent_files` and `RunOut.agent_files` are new fields.
 

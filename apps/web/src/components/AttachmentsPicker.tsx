@@ -7,6 +7,8 @@ import type { FileEntry, FilesListing } from "@/lib/types";
 export interface PickedFile {
   path: string;
   size: number;
+  /** Set when the form suggested this file from the goal: the goal words it matched. */
+  suggested?: string[];
 }
 
 interface Props {
@@ -82,9 +84,33 @@ export function AttachmentsPicker({ listFiles, selected, onChange }: Props) {
       {selected.length > 0 && (
         <ul className="mt-1 space-y-0.5 text-[11px]">
           {selected.map((f) => (
-            <li key={f.path} data-testid="attachment-chip" className="flex gap-2">
-              <span className="min-w-0 flex-1 truncate font-mono">{f.path}</span>
-              <span className="text-muted">{formatSize(f.size)}</span>
+            <li
+              key={f.path}
+              data-testid="attachment-chip"
+              data-suggested={f.suggested ? "true" : undefined}
+              className="flex items-center gap-2"
+            >
+              <span className="min-w-0 flex-1 truncate font-mono" title={f.path}>
+                {f.path.split("/").slice(-2).join("/")}
+              </span>
+              {f.suggested && (
+                <span
+                  className="shrink-0 rounded bg-accent-soft px-1 text-[10px] text-accent"
+                  title={`Matches: ${f.suggested.join(", ")}`}
+                >
+                  suggested
+                </span>
+              )}
+              <span className="shrink-0 text-muted">{formatSize(f.size)}</span>
+              <button
+                type="button"
+                data-testid="attachment-remove"
+                aria-label={`Remove ${f.path}`}
+                className="shrink-0 px-1 text-muted hover:text-danger"
+                onClick={() => onChange(selected.filter((x) => x.path !== f.path))}
+              >
+                ×
+              </button>
             </li>
           ))}
           <li className={overLimit ? "text-danger" : "text-muted"} data-testid="attachments-estimate">
