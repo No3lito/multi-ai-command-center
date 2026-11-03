@@ -280,6 +280,10 @@ class DecisionOut(Strict):
     decided_at: datetime | None
     follow_up_run_id: str | None
     created_at: datetime
+    # Pending decisions: why approving would start nothing (no worker, round limit), if so.
+    cannot_run_reason: str | None = None
+    # The run that raised it was the last allowed round on this topic.
+    final_round: bool = False
 
 
 class DecisionAnswerIn(Strict):
@@ -362,6 +366,10 @@ class RunOut(Strict):
     pending_decisions: list[str] | None = None
     archived_at: datetime | None = None
     agent_files: bool = True
+    verdict: Literal["done", "blocked", "needs_you"] | None = None
+    chain_root_id: str | None = None
+    chain_depth: int = 0
+    wrap_up: bool = False
     turn_count: int
     max_turns: int
     budget_usd: float
@@ -376,6 +384,8 @@ class RunOut(Strict):
 class DecisionAnswerOut(Strict):
     decision: DecisionOut
     follow_up_run: RunOut | None
+    # Approve or more info that started nothing, and why (also posted in the room).
+    no_run_reason: str | None = None
 
 
 class HistoryOut(Strict):

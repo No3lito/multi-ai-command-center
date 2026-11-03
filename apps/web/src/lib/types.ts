@@ -187,6 +187,13 @@ export interface Run {
   pending_decisions?: string[] | null;
   /** Set when the owner archived the run: hidden from the chat and run list, kept in History. */
   archived_at?: string | null;
+  /** The brief's verdict, once written. */
+  verdict?: "done" | "blocked" | "needs_you" | null;
+  /** Follow-up chains: the run that started the chain, and this run's round (0 = started by the owner). */
+  chain_root_id?: string | null;
+  chain_depth?: number;
+  /** The owner asked this run to conclude now. */
+  wrap_up?: boolean;
   turn_count: number;
   max_turns: number;
   budget_usd: number;
@@ -232,6 +239,10 @@ export interface Decision {
   decided_at: string | null;
   follow_up_run_id: string | null;
   created_at: string;
+  /** Pending: why approving would start nothing (no worker in the room, round limit). */
+  cannot_run_reason?: string | null;
+  /** Raised in the last allowed round on this topic. */
+  final_round?: boolean;
 }
 
 export interface DecisionAnswerBody {
@@ -248,6 +259,8 @@ export interface HistoryResult {
 export interface DecisionAnswerResult {
   decision: Decision;
   follow_up_run: Run | null;
+  /** Approve or more info that started nothing, and why. */
+  no_run_reason?: string | null;
 }
 
 /** An external agent (for example Grok Bot) connected over MCP with a token. */

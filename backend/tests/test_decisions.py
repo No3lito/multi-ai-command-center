@@ -76,9 +76,24 @@ def test_split_brief_tolerates_bad_blocks() -> None:
     assert [d.question for d in drafts] == ["fine"]
 
 
-def test_instructions_name_participants_and_forbid_trades() -> None:
-    text = decisions.instruction_suffix(["Claude", "GPT", "Grok Bot"], ["logs/a.md"])
-    assert "Claude, GPT, Grok Bot" in text and "logs/a.md" in text and "Never propose real trades" in text
+def test_instructions_list_who_can_do_work_and_forbid_trades() -> None:
+    who = decisions.describe_executors(
+        [("Claude", "anthropic", True), ("GPT", "openai", True), ("Grok", "xai", False)], ["Grok Bot"]
+    )
+    assert len(who) == 3 and not any(line.startswith("Grok (") for line in who), (
+        "unusable agents are left out"
+    )
+    text = decisions.instruction_suffix(who, ["logs/a.md"])
+    assert "Claude (anthropic)" in text and "Grok Bot (connected agent)" in text and "Cannot run code" in text
+    assert "logs/a.md" in text and "Never propose real trades" in text and "FINAL ROUND" not in text
+    assert "FINAL ROUND" in decisions.instruction_suffix(who, [], final_round=True)
+
+
+def test_dollar_caps_in_notes_are_found() -> None:
+    assert decisions.note_cap("Total spend must stay under $1.00. Do not merge.") == Decimal("1.00")
+    assert decisions.note_cap("cap at $0.50, max $2") == Decimal("0.50")
+    assert decisions.note_cap("approve the $5 data pull") is None, "a price is not a cap"
+    assert decisions.note_cap(None) is None
 
 
 # ---------------------------------------------------------------- engine
@@ -144,31 +159,63 @@ async def test_brief_without_block_falls_back_to_bullets(world: dict[str, Any]) 
     assert rows[0].follow_up["on_approve"]["workflow"] == "none"
 
 
-async def test_follow_up_without_its_worker_falls_back_to_the_reviewers(world: dict[str, Any]) -> None:  # noqa: F811
-    run = await brief_run(world, briefer("**Bottom line:** Ok." + FENCE))
+async def test_follow_ups_never_fall_back_silently_and_stop_at_limits(world: dict[str, Any]) -> None:  # noqa: F811
+    run = await brief_run(
+        world, briefer("**Verdict:** Needs you. One question.\n**Bottom line:** Ok." + FENCE)
+    )
     async with world["sm"]() as s:
-        d = await s.scalar(
-            select(models.Decision).where(models.Decision.run_id == run.id, models.Decision.position == 0)
+        done = await s.get(models.Run, run.id)
+        assert done is not None and done.verdict == "needs_you"
+        audit, lane = (
+            await s.scalars(
+                select(models.Decision)
+                .where(models.Decision.run_id == run.id)
+                .order_by(models.Decision.position)
+            )
+        ).all()
+        settings = cfg(world["url"])
+        owner = world["owner"].id
+
+        # Grok Bot is not in this room: approving starts nothing and says why (no hidden replanning).
+        blocked = await decisions.start_follow_up(
+            s, settings, audit, answer="approve", note="cap 50k", owner_id=owner, budget_usd=None
         )
-        assert d is not None
-        follow = await decisions.start_follow_up(
+        assert blocked.run is None and blocked.reason and "Nobody connected can do this" in blocked.reason
+
+        # More info (a discussion) runs, joins the chain, carries only the previous brief, and obeys
+        # the dollar cap written in the note.
+        more = await decisions.start_follow_up(
             s,
-            cfg(world["url"]),
-            d,
-            answer="approve",
-            note="cap 50k",
-            owner_id=world["owner"].id,
+            settings,
+            lane,
+            answer="more_info",
+            note="Keep it under $0.30.",
+            owner_id=owner,
             budget_usd=None,
         )
-        assert follow is not None
-        # Grok Bot is not in this room, so the designers handle it as a plan & review.
-        assert follow.kind == "collab" and follow.builder_id is None
-        assert follow.goal.startswith("Run the coverage audit")
-        assert (
-            "The owner APPROVED this decision" in follow.goal
-            and "Owner's note (follow it): cap 50k" in follow.goal
+        assert more.run is not None and more.reason is None
+        assert more.run.kind == "collab" and more.run.chain_root_id == run.id and more.run.chain_depth == 1
+        assert more.run.budget_usd == Decimal("0.30")
+        assert "every sentence is a requirement" in more.run.goal
+        await s.flush()
+        carried = (
+            await s.scalars(
+                select(models.RunAttachment.path).where(models.RunAttachment.run_id == more.run.id)
+            )
+        ).all()
+        assert carried == [f"previous-run/{run.id}.md"]
+
+        # Round limit: a decision raised in the final round starts nothing.
+        done.chain_depth = decisions.MAX_ROUNDS
+        assert "follow-up rounds" in (await decisions.plan_check(s, lane, "more_info") or "")
+        done.chain_depth = 0
+
+        # Chain budget: once the chain has spent nearly all of it, nothing more starts.
+        done.spent_usd = decisions.CHAIN_BUDGET - Decimal("0.05")
+        broke = await decisions.start_follow_up(
+            s, settings, lane, answer="more_info", note=None, owner_id=owner, budget_usd=None
         )
-        assert follow.budget_usd == Decimal("1") and follow.write_brief
+        assert broke.run is None and broke.reason and "budget for this topic is used up" in broke.reason
         await s.rollback()
 
 
@@ -204,6 +251,8 @@ async def test_owner_answers_decisions_from_the_dashboard(fresh_database_url: st
                 ).json()
                 assert [d["question"] for d in pending] == [b["question"] for b in BLOCK]
                 audit_card, lane_card = pending
+                assert "Nobody connected can do this" in audit_card["cannot_run_reason"]
+                assert lane_card["cannot_run_reason"] is None and not audit_card["final_round"]
                 assert audit_card["on_approve"]["workflow"] == "review" and audit_card["run_goal"] == "Review"
 
                 async with httpx.AsyncClient(base_url=srv.base_url, headers={"X-CC-CSRF": "1"}) as anon:
@@ -222,30 +271,37 @@ async def test_owner_answers_decisions_from_the_dashboard(fresh_database_url: st
                     body["decision"]["status"] == "approved"
                     and body["decision"]["owner_note"] == "cap 50k credits"
                 )
-                follow = body["follow_up_run"]
-                assert follow is not None and body["decision"]["follow_up_run_id"] == follow["id"]
-                assert follow["kind"] == "collab", "Grok Bot is not connected here, so the reviewers take it"
-                assert follow["budget_usd"] == 0.4 and "cap 50k credits" in follow["goal"]
+                # Grok Bot is not in this room: nothing starts, and the reason is said plainly.
+                assert body["follow_up_run"] is None and body["decision"]["follow_up_run_id"] is None
+                assert "Nobody connected can do this" in body["no_run_reason"]
 
                 again = await c.post(f"/api/decisions/{audit_card['id']}/answer", json={"answer": "decline"})
                 assert again.status_code == 409
 
-                declined = await c.post(
-                    f"/api/decisions/{lane_card['id']}/answer", json={"answer": "decline"}
+                asked = await c.post(
+                    f"/api/decisions/{lane_card['id']}/answer",
+                    json={"answer": "more_info", "note": "Keep it under $0.40."},
                 )
-                assert declined.status_code == 200 and declined.json()["follow_up_run"] is None
+                follow = asked.json()["follow_up_run"]
+                assert follow["kind"] == "collab" and follow["budget_usd"] == 0.4
+                assert follow["chain_depth"] == 1 and follow["chain_root_id"] == r.json()["id"]
 
                 items = (await c.get(f"/api/rooms/{room_id}/messages", params={"limit": 200})).json()["items"]
                 said = [m["body"]["text"] for m in items if m["sender"]["display_name"] == "Coordinator"]
-                assert any(t.startswith("Owner APPROVED: Approve the capped Helius") for t in said)
-                assert any(t.startswith("Owner DECLINED: Keep the meme lane open?") for t in said)
+                assert any(
+                    t.startswith("Owner APPROVED: Approve the capped Helius") and "Nothing was started:" in t
+                    for t in said
+                )
+                assert any(
+                    t.startswith("Owner asked for MORE INFORMATION on: Keep the meme lane") for t in said
+                )
 
                 followed = await wait_run(c, follow["id"], within=30)
                 assert followed["status"] == "completed", followed
                 decided = (
                     await c.get(f"/api/rooms/{room_id}/decisions", params={"status": "decided"})
                 ).json()
-                assert {d["status"] for d in decided} == {"approved", "declined"}
+                assert {d["status"] for d in decided} >= {"approved", "more_info"}
                 assert decided[-1]["why"] is None or isinstance(decided[-1]["why"], str)
                 approved = next(d for d in decided if d["status"] == "approved")
                 assert approved["recommended"] == "approve" and approved["suggested_note"].startswith(
@@ -282,3 +338,71 @@ async def test_owner_answers_decisions_from_the_dashboard(fresh_database_url: st
                 refused = await c.post(f"/api/runs/{busy.json()['id']}/archive")
                 assert refused.status_code in (200, 409)  # 409 while it is still running
                 await wait_run(c, busy.json()["id"])
+
+
+async def test_wrap_up_skips_to_a_concluding_brief(world: dict[str, Any]) -> None:  # noqa: F811
+    adapter = briefer("**Verdict:** Done. Stop here.\n**Bottom line:** Concluded.")
+    port = await port_for(world["sm"], cfg(world["url"]), adapter)
+    engine = BuiltinEngine(world["sm"], port, world["coordinator"], Decimal("0.25"), simulated=False)
+    run = await add_run(
+        world,
+        kind="collab",
+        step="critique",
+        planner_id=world["agents"]["Claude"].id,
+        critic_id=world["agents"]["GPT"].id,
+        agent_id=None,
+        max_turns=1,
+        turn_count=1,
+        wrap_up=True,
+    )
+    while await engine.step(run.id):
+        pass
+    async with world["sm"]() as s:
+        done = await s.get(models.Run, run.id)
+    assert done is not None and done.status == "completed" and done.verdict == "done"
+    assert adapter.calls == 1, "the critique was skipped; only the brief was written"
+    task = adapter.last.messages[0].content.rsplit("YOUR TASK:", 1)[1]
+    assert (
+        "WRAP UP NOW" in task and "**Verdict:**" in task and "Never ask the owner who should do work" in task
+    )
+
+
+async def test_workflow_steps_read_their_own_run_not_other_runs(world: dict[str, Any]) -> None:  # noqa: F811
+    from command_center.messaging import service
+    from command_center.orchestrator.context import build_request
+
+    other = await add_run(world, kind="collab", step="plan", agent_id=None)
+    mine = await add_run(world, kind="collab", step="plan", agent_id=None)
+    async with world["sm"]() as s:
+        owner = await s.get(models.Principal, world["owner"].id)
+        claude = await s.get(models.Principal, world["agents"]["Claude"].id)
+        profile = await s.get(models.AgentProfile, world["agents"]["Claude"].id)
+        assert owner and claude and profile
+        await service.append_message(
+            s, world["room"].id, owner, kind="chat", text="owner says hi", idempotency_key="k1"
+        )
+        for key, run_id, text in (("k2", other.id, "OTHER RUN TEXT"), ("k3", mine.id, "MY RUN TEXT")):
+            await service.append_message(
+                s,
+                world["room"].id,
+                claude,
+                kind="chat",
+                text=text,
+                idempotency_key=key,
+                correlation_id=run_id,
+            )
+        lean = await build_request(
+            s,
+            room_id=world["room"].id,
+            agent=claude,
+            profile=profile,
+            instruction="x",
+            run_id=mine.id,
+            lean=True,
+        )
+        full = await build_request(
+            s, room_id=world["room"].id, agent=claude, profile=profile, instruction="x", run_id=mine.id
+        )
+    text = lean.messages[0].content
+    assert "owner says hi" in text and "MY RUN TEXT" in text and "OTHER RUN TEXT" not in text
+    assert "OTHER RUN TEXT" in full.messages[0].content, "reply runs still see the whole room"

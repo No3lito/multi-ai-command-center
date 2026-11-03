@@ -120,6 +120,22 @@ def test_suggestions_match_goal_words_against_names_and_contents(layout: tuple[P
     assert ws.suggest(MEME, "please review the project") == [], "stop words alone match nothing"
 
 
+def test_project_cards_can_name_files_every_run_reads(layout: tuple[Path, Path]) -> None:
+    from command_center import project_files
+
+    root, sources = layout
+    card = root / MEME / "PROJECT.md"
+    card.write_text(
+        card.read_text().replace(
+            "status: active", "status: active\nalways_read: sources/trading-review/README.md"
+        )
+    )
+    ws = Workspace(root, sources)
+    project = ws.project(MEME)
+    assert project is not None and project.always_read == ("sources/trading-review/README.md",)
+    assert f"{MEME}/sources/trading-review/README.md" in project_files.context_paths(ws, project)
+
+
 def test_projects_create_and_index(layout: tuple[Path, Path]) -> None:
     root, sources = layout
     ws = Workspace(root, sources)

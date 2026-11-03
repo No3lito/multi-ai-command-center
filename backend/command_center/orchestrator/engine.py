@@ -26,7 +26,7 @@ from command_center.ids import new_id
 from command_center.messaging import service
 from command_center.orchestrator.context import build_request
 from command_center.providers.base import ProviderError
-from command_center.providers.model_port import BudgetExceeded, ModelPort, ProviderNotReady
+from command_center.providers.model_port import BudgetExceeded, ModelPort, ProviderNotReady, agent_status
 from command_center.workspace import Workspace
 
 log = logging.getLogger(__name__)
@@ -191,6 +191,15 @@ async def create_reply_runs(
         runs.append(run)
     await session.commit()
     return runs
+
+
+_VERDICT = re.compile(r"verdict[*_:\s]*\**\s*(done|blocked|needs you)", re.IGNORECASE)
+
+
+def parse_verdict(brief: str) -> str | None:
+    """done | blocked | needs_you from the brief's first **Verdict:** line, if present."""
+    m = _VERDICT.search(brief[:600])
+    return m.group(1).lower().replace(" ", "_") if m else None
 
 
 def short_goal(goal: str, limit: int = 160) -> str:
@@ -475,7 +484,15 @@ class BuiltinEngine:
                 await self._fail(run, "failed", "Agent no longer exists.")
                 return None
             req = await build_request(
-                s, room_id=run.room_id, agent=agent, profile=profile, instruction=instruction, run_id=run.id
+                s,
+                room_id=run.room_id,
+                agent=agent,
+                profile=profile,
+                instruction=instruction,
+                run_id=run.id,
+                # Workflow runs read their own conversation plus the owner's recent chat only;
+                # other runs' long transcripts made every step slower and costlier.
+                lean=run.kind != "reply",
             )
             if max_output_tokens is not None:
                 req = replace(req, max_output_tokens=max_output_tokens)
@@ -569,6 +586,18 @@ class BuiltinEngine:
             return False
         if run.kind == "reply":
             return await self._reply_step(run)
+        if run.wrap_up and run.step not in ("brief", "summary", "done"):
+            # The owner asked to conclude now: skip the remaining steps and write the brief.
+            await self._update(
+                run.id,
+                step="brief",
+                status="running" if run.status == "waiting" else run.status,
+                waiting_for=None,
+                waiting_instruction=None,
+                write_brief=True,
+                max_turns=max(run.max_turns, run.turn_count + 1),
+            )
+            return True
         if run.step == "select":
             return await self._select_step(run)
         if run.step == "brief":
@@ -1056,23 +1085,49 @@ class BuiltinEngine:
             data={"run_id": run.id, "status": "running", "step": "brief"},
         )
         rule = f" {RESEARCH_ONLY}" if run.kind == "review" else ""
+        final_round = (run.chain_depth or 0) >= decisions.MAX_ROUNDS
+        wrap = (
+            " The owner asked to WRAP UP NOW: conclude with what the conversation already has; the "
+            "verdict must be Done or Blocked unless money or a change of direction is needed."
+            if run.wrap_up
+            else ""
+        )
+        final = (
+            " This is the FINAL ROUND on this topic: give the final recommendation (proceed, with "
+            "the cost, or stop) and propose no further discussion."
+            if final_round
+            else ""
+        )
         instruction = (
-            f"Write the decision brief for the owner about this run ({short_goal(run.goal)}). Use exactly "
-            "these bold headings, in this order, each followed by short bullets:\n"
+            f"Write the decision brief for the owner about this run ({short_goal(run.goal)}). Start "
+            "with one line: **Verdict:** Done, Blocked or Needs you, then the answer in one sentence. "
+            "Done means the goal is met or answered; Blocked means it cannot proceed and says why; "
+            "Needs you means a decision below is required. Then use exactly these bold headings, in "
+            "this order, each followed by short bullets:\n"
             "**Bottom line:** one or two sentences.\n"
-            "**Decided:** what the participants agreed.\n"
+            "**Decided:** what the participants agreed or decided themselves.\n"
             "**Done:** only what was actually completed during this run, and by whom.\n"
-            "**Waiting on you:** each decision only the owner can make: what to decide, why it "
-            "matters, and the cost if known. Write 'Nothing' if there is none.\n"
+            "**Waiting on you:** only decisions that spend money beyond this run, touch anything "
+            "live or irreversible, or change direction. Decide everything else yourselves and list "
+            "it under Decided. Never ask the owner who should do work: use the list of who can do "
+            "work below, and if nobody can, say Blocked. Write 'Nothing' if there is none.\n"
             "**Next steps:** numbered; who does what, in order.\n"
             "**Open risks:** what is still uncertain.\n"
-            "Base it only on the conversation above and do not invent results. Under 350 words." + rule
+            "Treat every sentence of the owner's notes in the goal as a requirement (for example "
+            "'finalize' means conclude now). Base it only on the conversation above and do not "
+            "invent results. Under 350 words." + rule + wrap + final
         )
         async with self.sessionmaker() as s:
-            names = [
-                p.display_name
-                for p in [*await room_agents(s, run.room_id), *await room_externals(s, run.room_id)]
-            ]
+            roster: list[tuple[str, str, bool]] = []
+            for a in await room_agents(s, run.room_id):
+                prof = await s.get(models.AgentProfile, a.id)
+                usable = prof is not None and agent_status(self.models.settings, prof) in (
+                    "live",
+                    "simulated",
+                )
+                roster.append((a.display_name, prof.provider if prof is not None else "model", usable))
+            externals = [e.display_name for e in await room_externals(s, run.room_id) if e.status == "active"]
+            executors = decisions.describe_executors(roster, externals)
             attached = list(
                 (
                     await s.scalars(
@@ -1080,7 +1135,7 @@ class BuiltinEngine:
                     )
                 ).all()
             )
-        instruction += decisions.instruction_suffix(names, attached)
+        instruction += decisions.instruction_suffix(executors, attached, final_round=final_round)
         self.raw_answers.pop(run.id, None)
         msg_id = await self._agent_turn(
             run,
@@ -1114,6 +1169,8 @@ class BuiltinEngine:
                 await decisions.store(s, fresh, drafts)
                 await s.commit()
         questions = [d.question for d in drafts] or pending
-        await self._update(run.id, step="summary", brief=brief, pending_decisions=questions)
+        await self._update(
+            run.id, step="summary", brief=brief, pending_decisions=questions, verdict=parse_verdict(brief)
+        )
         await self._save_to_project(run, brief, questions, run.last_message_id)
         return True

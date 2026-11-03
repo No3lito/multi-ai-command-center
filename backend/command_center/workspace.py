@@ -71,6 +71,7 @@ class Project:
     title: str
     status: str
     goal: str
+    always_read: tuple[str, ...] = ()
 
 
 def mount_key(project: str, name: str) -> str:
@@ -304,6 +305,11 @@ class Workspace:
                     title=title,
                     status=meta.get("status", "active"),
                     goal=_section(text, "Goal")[:500],
+                    always_read=tuple(
+                        p
+                        for p in (x.strip().strip("[]") for x in meta.get("always_read", "").split(","))
+                        if p
+                    ),
                 )
             )
         return out

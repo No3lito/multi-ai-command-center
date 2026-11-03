@@ -5,6 +5,7 @@ import { isApiError } from "@/lib/api";
 import { formatUsd } from "@/lib/format";
 import { isRunActive, type Run, type RunStatus } from "@/lib/types";
 import { ErrorText, PanelSection, Pill, type PillTone } from "./PanelSection";
+import { VerdictPill } from "./VerdictPill";
 
 const STATUS: Record<RunStatus, { label: string; tone: PillTone }> = {
   queued: { label: "Queued", tone: "muted" },
@@ -24,6 +25,8 @@ interface Props {
   agentName: (id: string | null) => string | null;
   onCancel: (runId: string) => Promise<unknown>;
   onRetry: () => void;
+  /** Ask an active plan, build or review to conclude now. */
+  onWrapUp?: (runId: string) => Promise<unknown>;
 }
 
 const RECENT = 5;
@@ -37,7 +40,7 @@ export function visibleRuns(runs: readonly Run[], showAll: boolean): { shown: Ru
   return { shown: [...active, ...keep], hidden: done.length - keep.length };
 }
 
-export function RunsPanel({ hasRoom, runs: allRuns, loaded, error, agentName, onCancel, onRetry }: Props) {
+export function RunsPanel({ hasRoom, runs: allRuns, loaded, error, agentName, onCancel, onRetry, onWrapUp }: Props) {
   const [showAll, setShowAll] = useState(false);
   const { shown: runs, hidden } = visibleRuns(allRuns, showAll);
   return (
@@ -50,7 +53,7 @@ export function RunsPanel({ hasRoom, runs: allRuns, loaded, error, agentName, on
           {loaded && runs.length === 0 && !error && <p className="text-xs text-muted">No runs yet.</p>}
           <ul className="space-y-2">
             {runs.map((r) => (
-              <RunItem key={r.id} run={r} agentName={agentName} onCancel={onCancel} />
+              <RunItem key={r.id} run={r} agentName={agentName} onCancel={onCancel} onWrapUp={onWrapUp} />
             ))}
           </ul>
           {(hidden > 0 || showAll) && (
@@ -81,10 +84,12 @@ function RunItem({
   run,
   agentName,
   onCancel,
+  onWrapUp,
 }: {
   run: Run;
   agentName: (id: string | null) => string | null;
   onCancel: (runId: string) => Promise<unknown>;
+  onWrapUp?: (runId: string) => Promise<unknown>;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +111,19 @@ function RunItem({
               .join(" and ")}`
           : agentName(run.agent_id);
   const waitingFor = run.status === "waiting" ? (agentName(run.waiting_for ?? null) ?? "an external agent") : null;
+
+  async function wrapUp() {
+    if (!onWrapUp) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onWrapUp(run.id);
+    } catch (e) {
+      setError(isApiError(e) ? e.message : "Could not wrap up the run.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function cancel() {
     setBusy(true);
@@ -139,13 +157,26 @@ function RunItem({
             Simulated
           </span>
         )}
+        <VerdictPill verdict={run.verdict} />
+        {active && onWrapUp && run.kind !== "reply" && (
+          <button
+            type="button"
+            data-testid="run-wrap-up"
+            onClick={() => void wrapUp()}
+            disabled={busy || run.wrap_up}
+            title="Stop discussing and write the conclusion now"
+            className="ml-auto rounded bg-accent px-1.5 py-px text-[11px] font-medium text-white disabled:opacity-50"
+          >
+            {run.wrap_up ? "Wrapping up" : "Wrap it up"}
+          </button>
+        )}
         {active && (
           <button
             type="button"
             data-testid="run-cancel"
             onClick={() => void cancel()}
             disabled={busy}
-            className="ml-auto rounded border border-line px-1.5 py-px text-[11px] font-medium hover:bg-panel-2 disabled:opacity-50"
+            className={`${onWrapUp && run.kind !== "reply" ? "" : "ml-auto "}rounded border border-line px-1.5 py-px text-[11px] font-medium hover:bg-panel-2 disabled:opacity-50`}
           >
             {busy ? "Cancelling" : "Cancel"}
           </button>

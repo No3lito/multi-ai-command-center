@@ -189,6 +189,13 @@ class Run(Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # In a project room, the lead agent picks the project files to read before the first step.
     agent_files: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # The brief's verdict: done | blocked | needs_you (None until a brief is written).
+    verdict: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Follow-up chains: the run that started the chain, and this run's round (0 = owner-started).
+    chain_root_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    chain_depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # The owner asked to conclude now: skip to the brief.
+    wrap_up: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     __table_args__ = (
         CheckConstraint("kind in ('collab','reply','build','review')", name="run_kind"),
@@ -200,6 +207,7 @@ class Run(Base):
         Index("runs_active", "status", "created_at", postgresql_where="status in ('queued','running')"),
         Index("runs_by_room", "room_id", "created_at"),
         Index("runs_by_root", "root_run_id"),
+        Index("runs_by_chain", "chain_root_id"),
     )
 
 

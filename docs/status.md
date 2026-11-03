@@ -2,6 +2,18 @@
 
 Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
 
+## Conclude, don't loop (in review, branch `agent/claude/conclude`, stacked on PR #10)
+
+The first real self-review went around the same scope five times, about $1.80, without a result. The causes were silent fallbacks, every brief having to ask the owner something, unenforced caps, and stale context. Fixes: a verdict on every brief, a 2-round limit, a shared $2 chain budget with caps from notes enforced, an honest list of who can do work, "Nothing was started" reasons, lean follow-ups and context, a facts sheet (`docs/command-center-facts.md`) and **Wrap it up**. Contract: `docs/api/decisions.md`, migration 0013.
+
+Evidence:
+
+- Backend: 160 passed. The new tests cover no silent fallback, note caps, the round limit, the chain budget, carried-forward context, wrap-up, lean context and `always_read`.
+- Dashboard: 132 passed.
+- Playwright: 6 passed, including wrapping up a review that waits for Grok Bot.
+
+**Not yet verified with real models.**
+
 ## Project workspace (in review, branch `agent/claude/workspace-projects`, stacked on PR #9)
 
 The owner's work now lives in one workspace folder, which is also an Obsidian vault. The folders are organized as families and projects, and the owner's live folders are linked in read-only. Rooms are linked to projects. In a project room:

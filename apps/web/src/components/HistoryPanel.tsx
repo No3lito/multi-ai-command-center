@@ -5,6 +5,7 @@ import { isApiError, type Api } from "@/lib/api";
 import type { HistoryResult, Run } from "@/lib/types";
 import { bottomLine } from "./DecisionsPanel";
 import { PanelSection } from "./PanelSection";
+import { VerdictPill } from "./VerdictPill";
 
 interface Props {
   roomId: string;
@@ -113,7 +114,10 @@ export function HistoryPanel({ roomId, client, onRunChanged, refreshKey = "", de
                 aria-expanded={expanded}
                 onClick={() => setOpen(expanded ? null : r.id)}
               >
-                <span className="font-medium">{(r.brief && bottomLine(r.brief)) || r.goal.split("\n")[0]}</span>
+                <span className="flex items-start gap-1.5 font-medium">
+                  <VerdictPill verdict={r.verdict} />
+                  <span>{(r.brief && bottomLine(r.brief)) || r.goal.split("\n")[0]}</span>
+                </span>
                 <span className="block truncate text-[10px] text-muted">
                   {new Date(r.finished_at ?? r.updated_at).toLocaleString()} · {r.goal.split("\n")[0]}
                   {r.archived_at ? " · archived" : ""}
