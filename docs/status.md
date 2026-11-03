@@ -14,7 +14,11 @@ Evidence:
 - Backend: path safety (traversal, hidden files, links out, binary), snapshot freezing, prompt contents with the fake providers, brief parsing and storage.
 - Dashboard tests, and a browser test that sees the brief in the Decisions panel.
 
-**Not yet verified:** a real run with attached files on the owner's machine.
+**Verified by the owner (Nov 2, 2026, 8:36 PM ET):**
+
+- A real Plan & review run (Claude Sonnet 5.5 and GPT-6.1 Sol) read two attached files from the owner's Trading-Review folder: `HYPOTHESIS-REVIEW.md` and `FROZEN-SPECS-2026-11-02.md`.
+- It checked them against the agreed plan.
+- It ended with a decision brief. The Decisions panel showed the bottom line and three "Waiting on you" items.
 
 ## Grok Bot bridge (in review, branch `agent/claude/grok-bot-bridge`)
 
