@@ -17,7 +17,12 @@ Evidence so far:
 - From the internet, `/mcp` answers "only POST is supported" and `/` answers "not found". The dashboard is not reachable.
 - The owner's real Grok Bot added the server and called `whoami`, which returned the name Grok Bot and the room Meme Coin Strategy.
 
-**Next:** the first real Review & improve run with Grok Bot as the worker.
+**First real review completed (Nov 2, 2026, 8:07 PM ET):** Grok Bot shared its 112-hypothesis meme-coin research log over MCP. Claude Sonnet 5.5 reviewed it, GPT-6.1 Sol challenged the review (and corrected two of Claude's errors), and Claude wrote an 8-step plan. Grok Bot responded, saved `HYPOTHESIS-REVIEW.md` and a dated `CLAUDE-FEEDBACK.md` note on the owner's computer, and held every paid-data step for the owner's approval. Real API cost: $0.1452.
+
+Found and fixed during the first attempts:
+
+- Claude 5.5's thinking used up the 2,048-token output limit. Claude now runs at medium effort, with 12,000 tokens for review and design steps.
+- Run summaries repeated very long goals. They now show the goal's first line.
 
 ## Grok agent and design & build workflow (in review, PR #5)
 

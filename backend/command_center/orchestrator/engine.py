@@ -187,6 +187,13 @@ async def create_reply_runs(
     return runs
 
 
+def short_goal(goal: str, limit: int = 160) -> str:
+    """The goal's first line, shortened, for summaries (the full goal is in step 1)."""
+    first = goal.strip().splitlines()[0] if goal.strip() else ""
+    first = first.rstrip(" .")
+    return first if len(first) <= limit else first[: limit - 3].rstrip() + "..."
+
+
 MESSAGE_TEXT_LIMIT = 32_000  # CCMP v1 body.text maxLength
 
 
@@ -592,7 +599,7 @@ class BuiltinEngine:
             label = "simulated, no API cost" if run.simulated else f"real API cost ${spent:.4f}"
             text = (
                 f"Run complete. {p} planned, {c} reviewed, and {p} produced the revised plan above "
-                f"for: {run.goal}. {run.turn_count} agent turns, {label}."
+                f"for: {short_goal(run.goal)}. {run.turn_count} agent turns, {label}."
             )
             await self._post(
                 run,
@@ -714,7 +721,7 @@ class BuiltinEngine:
                 else f"{c} approved the build; the code is in {b}'s step 5 message."
             )
             text = (
-                f"Run complete. {p} and {c} designed it and {b} built it for: {run.goal}. "
+                f"Run complete. {p} and {c} designed it and {b} built it for: {short_goal(run.goal)}. "
                 f"{where} {run.turn_count} agent turns, {label}."
             )
             await self._post(
@@ -828,7 +835,7 @@ class BuiltinEngine:
             label = "simulated, no API cost" if run.simulated else f"real API cost ${spent:.4f}"
             text = (
                 f"Review complete. {w} shared its work, {p} and {c} reviewed it and wrote the plan "
-                f"(step 4), and {w} responded for: {run.goal}. {run.turn_count} turns, {label}."
+                f"(step 4), and {w} responded for: {short_goal(run.goal)}. {run.turn_count} turns, {label}."
             )
             await self._post(
                 run,

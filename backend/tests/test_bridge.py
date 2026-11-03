@@ -232,6 +232,7 @@ async def test_review_with_grok_bot_over_mcp(fresh_database_url: str, tmp_path: 
                 ]
                 assert chats[0][1] == "[Part 1 of 2]\n"
                 assert "Grok Bot shared its work" in msgs[-1]["body"]["text"]
+                assert len(msgs[-1]["body"]["text"]) < 400, "the summary does not repeat a long goal"
 
                 calls = await fake_calls(fake)
                 assert (calls["anthropic"], calls["openai"]) == (2, 1)
