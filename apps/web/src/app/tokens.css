@@ -39,6 +39,19 @@
   --speaker-green: #8FE3A8;
   --speaker-rose: #F28BA8;
   --speaker-system: #8B95A5;
+  /* Color choices for speakers (Setup > Colors). Each has a light-mode shade below. */
+  --swatch-orange: #E8955A;
+  --swatch-green: #34C79A;
+  --swatch-blue: #4C9AFF;
+  --swatch-sky: #38BDF8;
+  --swatch-violet: #A78BFA;
+  --swatch-pink: #F28BA8;
+  --swatch-yellow: #F5C451;
+  --swatch-red: #FF8A80;
+  --swatch-teal: #2DD4BF;
+  --swatch-gray: #B6BFCC;
+  --speaker-grok: var(--swatch-sky);
+  --speaker-grokbot: var(--swatch-violet);
   --bubble-mix: 16%;
   --avatar-ink: #0B0F14;
 
@@ -76,6 +89,16 @@
   --speaker-green: #15803D;
   --speaker-rose: #BE123C;
   --speaker-system: #5A6273;
+  --swatch-orange: #B4531A;
+  --swatch-green: #0B6648;
+  --swatch-blue: #1D4ED8;
+  --swatch-sky: #0369A1;
+  --swatch-violet: #5B3BB8;
+  --swatch-pink: #BE123C;
+  --swatch-yellow: #8A5A00;
+  --swatch-red: #B91C1C;
+  --swatch-teal: #0F766E;
+  --swatch-gray: #4B5563;
   --bubble-mix: 10%;
   --avatar-ink: #FFFFFF;
 

@@ -25,6 +25,7 @@ import { CollabForm } from "./CollabForm";
 import { Composer, composerDeliveryState, type MentionAgent } from "./Composer";
 import { ConnectionPill } from "./ConnectionPill";
 import { ThemeToggle } from "./ThemeToggle";
+import { SpeakerColorsPanel } from "./SpeakerColorsPanel";
 import { MessageList } from "./MessageList";
 import { RightPanel } from "./RightPanel";
 import { RunsPanel } from "./RunsPanel";
@@ -371,6 +372,7 @@ export function RoomView(props: Props) {
           )}
           {tab === "setup" && (
             <div role="tabpanel" id="tabpanel-setup" aria-labelledby="tab-setup">
+              <SpeakerColorsPanel />
               {roomDetail && !notFound && (
                 <ProjectPanel
                   workspace={workspace}
