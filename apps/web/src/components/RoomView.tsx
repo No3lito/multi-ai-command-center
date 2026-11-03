@@ -328,6 +328,18 @@ export function RoomView(props: Props) {
           hasRoom={!!roomId && !notFound}
           showDetails={tab === "setup"}
         >
+          {roomDetail && !notFound && roomId && (
+            <div className="sticky top-0 z-10 bg-panel">
+              <RightTabs
+                tab={tab}
+                onChange={setTab}
+                badges={{
+                  decide: decisions.decisions.filter((d) => d.status === "pending").length,
+                  runs: runs.runs.filter((r) => isRunActive(r) && !r.archived_at).length,
+                }}
+              />
+            </div>
+          )}
           {roomDetail && !notFound && roomId && tab === "decide" && (
             <div role="tabpanel" id="tabpanel-decide" aria-labelledby="tab-decide">
               <DecisionsPanel runs={runs.runs} decisions={decisions.decisions} onAnswer={onAnswer} />
@@ -397,18 +409,6 @@ export function RoomView(props: Props) {
                 memberIds={memberIds}
                 onAddToRoom={addAgent}
                 onChanged={reloadDetail}
-              />
-            </div>
-          )}
-          {roomDetail && !notFound && roomId && (
-            <div className="sticky bottom-0 mt-auto border-t border-line bg-panel">
-              <RightTabs
-                tab={tab}
-                onChange={setTab}
-                badges={{
-                  decide: decisions.decisions.filter((d) => d.status === "pending").length,
-                  runs: runs.runs.filter((r) => isRunActive(r) && !r.archived_at).length,
-                }}
               />
             </div>
           )}
