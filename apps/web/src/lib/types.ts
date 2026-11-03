@@ -143,6 +143,8 @@ export interface Run {
   brief?: string | null;
   /** The "Waiting on you" items from the brief. */
   pending_decisions?: string[] | null;
+  /** Set when the owner archived the run: hidden from the chat and run list, kept in History. */
+  archived_at?: string | null;
   turn_count: number;
   max_turns: number;
   budget_usd: number;
@@ -174,6 +176,12 @@ export interface Decision {
   run_goal: string;
   question: string;
   recommendation: string | null;
+  /** The answer Claude and GPT recommend, for the one-click "follow" button. */
+  recommended?: "approve" | "decline" | "more_info" | null;
+  /** Plain-language background for a busy owner. */
+  why?: string | null;
+  /** The note the agents suggest attaching when following their recommendation. */
+  suggested_note?: string | null;
   cost: string | null;
   on_approve: FollowUpPlan;
   on_more_info: FollowUpPlan;
@@ -188,6 +196,11 @@ export interface DecisionAnswerBody {
   answer: DecisionAnswer;
   note?: string;
   budget_usd?: number;
+}
+
+export interface HistoryResult {
+  runs: Run[];
+  decisions: Decision[];
 }
 
 export interface DecisionAnswerResult {

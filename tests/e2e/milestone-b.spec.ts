@@ -25,6 +25,16 @@ function roomAgent(page: Page, name: string): Locator {
     .filter({ has: page.locator("span", { hasText: new RegExp(`^${name}$`) }) });
 }
 
+async function tab(page: Page, name: "decide" | "runs" | "history" | "setup") {
+  await page.getByTestId(`tab-${name}`).click();
+  await expect(page.getByTestId(`tab-${name}`)).toHaveAttribute("aria-selected", "true");
+}
+
+async function openGoal(page: Page) {
+  await page.getByTestId("new-goal").click();
+  await expect(page.getByTestId("modal")).toBeVisible();
+}
+
 function messages(page: Page, opts: { senderKind: string; correlationId?: string; replyTo?: string }): Locator {
   let sel = `[data-testid="message-item"][data-sender-kind="${opts.senderKind}"]`;
   if (opts.correlationId) sel += `[data-correlation-id="${opts.correlationId}"]`;
@@ -37,6 +47,11 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   await signIn(page);
   await openRoom(page, "General");
 
+  // The right panel opens on Decide; agents, usage and connections live under Setup.
+  await expect(page.getByTestId("tab-decide")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("summary-panel")).toBeVisible();
+  await tab(page, "setup");
+
   // Seeded agents are room members and clearly marked as simulated.
   for (const name of ["Claude", "GPT"]) {
     const item = roomAgent(page, name);
@@ -45,7 +60,8 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
     await expect(item.getByTestId("agent-status")).toHaveAttribute("data-value", "simulated");
   }
 
-  // Start a collab run: planner Claude, critic GPT, default budget.
+  // Start a collab run from the New goal pop-up: planner Claude, critic GPT, default budget.
+  await openGoal(page);
   await page.getByTestId("collab-goal").fill("Create a basic login interface");
   await page.getByTestId("collab-workflow").selectOption("collab");
   await page.getByTestId("collab-planner").selectOption({ label: "Claude" });
@@ -53,6 +69,8 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   await expect(page.getByTestId("collab-budget")).toHaveValue("0.50");
   await expect(page.getByTestId("collab-start")).toBeEnabled();
   await page.getByTestId("collab-start").click();
+  await expect(page.getByTestId("modal")).toHaveCount(0);
+  await expect(page.getByTestId("tab-runs")).toHaveAttribute("aria-selected", "true");
 
   // The new run is listed first (newest first); remember its id.
   const firstRun = page.getByTestId("run-item").first();
@@ -68,7 +86,9 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   await expect(runItem.getByTestId("run-cancel")).toHaveCount(0);
   await expect(runItem.getByTestId("run-spent")).toHaveText("$0.00 of $0.50");
 
-  // The run ends with a decision brief, shown in the Decisions panel.
+  // The run ends with a decision brief, shown under Decide.
+  await tab(page, "decide");
+  await expect(page.getByTestId("summary-finished")).toContainText("1 run finished");
   const decisions = page.getByTestId("decisions-panel");
   await expect(decisions.getByTestId("decision-latest")).toBeVisible();
   await expect(decisions.getByTestId("decision-waiting")).toBeVisible();
@@ -85,16 +105,19 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   for (let i = 0; i < 4; i += 1) {
     await expect(agentMsgs.nth(i).getByTestId("simulated-badge")).toHaveText("SIMULATED");
   }
-  await expect(messages(page, { senderKind: "system", correlationId: runId! }).getByTestId("simulated-badge")).toHaveCount(0);
+  await expect(
+    messages(page, { senderKind: "system", correlationId: runId! }).getByTestId("simulated-badge"),
+  ).toHaveCount(0);
 
   // The brief raised a decision card; answering it records the answer and tells the room.
   const card = decisions.getByTestId("decision-card");
   await expect(card).toHaveCount(1, { timeout: 10_000 });
   await expect(card).toContainText("[Simulated] Example decision");
   await expect(card.getByTestId("decision-plan")).toContainText("Nothing more runs");
-  await card.getByTestId("decision-add-note").click();
+  await expect(card.getByTestId("decision-why")).toContainText("simulated example");
+  await expect(card.getByTestId("decision-note")).toHaveValue("Simulated test: record my answer only.");
   await card.getByTestId("decision-note").fill("Looks good");
-  await card.getByTestId("decision-approve").click();
+  await card.getByTestId("decision-follow").click();
   await expect(decisions.getByTestId("decision-card")).toHaveCount(0);
   const decided = decisions.getByTestId("decision-decided-item");
   await expect(decided).toContainText("Approved");
@@ -104,13 +127,17 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   ).toHaveCount(1, { timeout: 10_000 });
 
   // Usage: simulated calls counted separately, no real spend.
+  await tab(page, "setup");
   const usagePanel = page.getByTestId("usage-panel");
   await expect(usagePanel.getByTestId("usage-spent")).toHaveText("$0.00");
   await expect(usagePanel.getByTestId("usage-cap")).toHaveText(/^\$\d+\.\d{2}$/);
   await expect
-    .poll(async () => Number((await usagePanel.getByTestId("usage-simulated-calls").textContent())?.replace(/,/g, "")), {
-      timeout: 35_000,
-    })
+    .poll(
+      async () => Number((await usagePanel.getByTestId("usage-simulated-calls").textContent())?.replace(/,/g, "")),
+      {
+        timeout: 35_000,
+      },
+    )
     .toBeGreaterThanOrEqual(3);
   await expect(usagePanel.getByTestId("usage-simulated")).toContainText("not real API usage");
   await expect(usagePanel.getByTestId("usage-table")).toHaveCount(0);
@@ -140,22 +167,39 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   // A reply run shows up in the run list and completes.
   const replyRunId = await reply.getAttribute("data-correlation-id");
   expect(replyRunId).toMatch(/^run_/);
+  await tab(page, "runs");
   await expect(page.locator(`[data-testid="run-item"][data-run-id="${replyRunId}"]`)).toHaveAttribute(
     "data-status",
     "completed",
     { timeout: 30_000 },
   );
+  await tab(page, "setup");
   await expect(usagePanel.getByTestId("usage-spent")).toHaveText("$0.00");
+
+  // The finished run is one card in the chat. Archiving hides it; History brings it back.
+  const fold = page.locator(`[data-testid="run-fold"][data-run-id="${runId}"]`);
+  await expect(fold).toHaveCount(1);
+  await expect(fold.getByTestId("run-fold-line")).toBeVisible();
+  await fold.getByTestId("run-fold-archive").click();
+  await expect(fold).toHaveCount(0);
+  await tab(page, "history");
+  await page.getByTestId("history-archived").check();
+  const archived = page.locator(`[data-testid="history-run"][data-run-id="${runId}"]`);
+  await expect(archived).toContainText("archived");
+  await archived.getByTestId("history-archive-toggle").click();
+  await expect(fold).toHaveCount(1);
 });
 
 test("simulated design & build: Claude and GPT design, Grok builds and applies fixes", async ({ page }) => {
   test.setTimeout(120_000);
   await signIn(page);
   await openRoom(page, "General");
+  await tab(page, "setup");
   for (const name of ["Claude", "GPT", "Grok"]) {
     await expect(roomAgent(page, name)).toHaveCount(1, { timeout: 10_000 });
   }
 
+  await openGoal(page);
   // With three usable agents the form opens on design & build with the seeded roles.
   await expect(page.getByTestId("collab-workflow")).toHaveValue("build");
   await expect(page.getByTestId("collab-builder").locator("option:checked")).toHaveText("Grok");
@@ -187,6 +231,7 @@ test("connect Grok Bot from the dashboard; a review run waits for it", async ({ 
   await signIn(page);
   await openRoom(page, "General");
 
+  await tab(page, "setup");
   const panel = page.getByTestId("connections-panel");
   await panel.getByTestId("connection-name").fill("Grok Bot E2E");
   await panel.getByTestId("connection-create").click();
@@ -201,6 +246,7 @@ test("connect Grok Bot from the dashboard; a review run waits for it", async ({ 
   );
 
   // With a connection in the room, the form offers review & improve with it as the worker.
+  await openGoal(page);
   await page.getByTestId("collab-workflow").selectOption("review");
   await page.getByTestId("collab-builder").selectOption({ label: "Grok Bot E2E (connected)" });
   await page.getByTestId("collab-goal").fill("Review the strategy work");
@@ -213,9 +259,9 @@ test("connect Grok Bot from the dashboard; a review run waits for it", async ({ 
   await runItem.getByTestId("run-cancel").click();
   await expect(runItem).toHaveAttribute("data-status", "cancelled", { timeout: 10_000 });
 
+  await tab(page, "setup");
   const item = panel.getByTestId("connection-item").filter({ hasText: "Grok Bot E2E" });
   await item.getByText("Disconnect").click();
   await item.getByTestId("connection-revoke-confirm").click();
   await expect(item).toHaveAttribute("data-status", "disabled");
 });
-

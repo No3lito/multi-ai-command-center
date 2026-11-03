@@ -26,6 +26,8 @@ BLOCK = [
     {
         "question": "Approve the capped Helius coverage audit?",
         "recommendation": "Approve: it decides whether H123 can be tested at all.",
+        "why": "The retests need launch data. This checks the data is complete before paying for more.",
+        "suggested_note": "Cap at 50k credits; stop and report if the pilot projects above it.",
         "cost": "about 50k Helius credits",
         "on_approve": {
             "workflow": "review",
@@ -48,6 +50,20 @@ def test_split_brief_takes_the_last_block_and_removes_it() -> None:
     assert [d.question for d in drafts] == [b["question"] for b in BLOCK]
     assert drafts[0].on_approve.workflow == "review" and drafts[0].on_approve.worker == "Grok Bot"
     assert drafts[1].on_approve.workflow == "none" and drafts[1].on_more_info.workflow == "collab"
+    assert drafts[0].recommended == "approve" and drafts[1].recommended == "more_info", (
+        "inferred from the text"
+    )
+    assert drafts[0].why and drafts[0].suggested_note and drafts[0].suggested_note.startswith("Cap at 50k")
+
+
+def test_recommended_answer_is_explicit_or_inferred() -> None:
+    assert decisions.infer_answer("Approve: free.") == "approve"
+    assert decisions.infer_answer("more info, because the price is unknown") == "more_info"
+    assert decisions.infer_answer("Decline for now.") == "decline"
+    assert decisions.infer_answer("Hold the retests.") == "decline"
+    assert decisions.infer_answer("It depends.") is None and decisions.infer_answer(None) is None
+    explicit = decisions.DecisionDraft(question="q", recommendation="Approve it", recommended="more_info")
+    assert explicit.recommended == "more_info", "an explicit answer wins over the text"
 
 
 def test_split_brief_tolerates_bad_blocks() -> None:
@@ -230,3 +246,39 @@ async def test_owner_answers_decisions_from_the_dashboard(fresh_database_url: st
                     await c.get(f"/api/rooms/{room_id}/decisions", params={"status": "decided"})
                 ).json()
                 assert {d["status"] for d in decided} == {"approved", "declined"}
+                assert decided[-1]["why"] is None or isinstance(decided[-1]["why"], str)
+                approved = next(d for d in decided if d["status"] == "approved")
+                assert approved["recommended"] == "approve" and approved["suggested_note"].startswith(
+                    "Cap at 50k"
+                )
+                assert approved["why"].startswith("The retests need launch data")
+
+                # Archive: hides a finished run; History still finds it; active runs cannot be archived.
+                source = r.json()["id"]
+                arch = await c.post(f"/api/runs/{source}/archive")
+                assert arch.status_code == 200 and arch.json()["archived_at"]
+                hist = (await c.get(f"/api/rooms/{room_id}/history", params={"q": "Review"})).json()
+                assert source in [x["id"] for x in hist["runs"]]
+                only = (await c.get(f"/api/rooms/{room_id}/history", params={"archived": "only"})).json()
+                assert [x["id"] for x in only["runs"]] == [source]
+                hidden = (await c.get(f"/api/rooms/{room_id}/history", params={"archived": "exclude"})).json()
+                assert source not in [x["id"] for x in hidden["runs"]]
+                found = (await c.get(f"/api/rooms/{room_id}/history", params={"q": "helius 50%"})).json()
+                assert found["decisions"] == [], "% is matched literally, not as a wildcard"
+                found = (await c.get(f"/api/rooms/{room_id}/history", params={"q": "capped HELIUS"})).json()
+                assert found["decisions"] and {d["question"] for d in found["decisions"]} == {
+                    BLOCK[0]["question"]
+                }
+                assert (await c.post(f"/api/runs/{source}/unarchive")).json()["archived_at"] is None
+
+                busy = await c.post(
+                    f"/api/rooms/{room_id}/runs",
+                    json={
+                        "goal": "Busy",
+                        "planner_id": agents["Claude"]["id"],
+                        "critic_id": agents["GPT"]["id"],
+                    },
+                )
+                refused = await c.post(f"/api/runs/{busy.json()['id']}/archive")
+                assert refused.status_code in (200, 409)  # 409 while it is still running
+                await wait_run(c, busy.json()["id"])

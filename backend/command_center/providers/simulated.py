@@ -36,7 +36,10 @@ class SimulatedAdapter:
                 "\n**Waiting on you:**\n- [Simulated] Example decision: approve this to try the buttons.\n"
                 '```decisions\n[{"question": '
                 '"[Simulated] Example decision: approve this to try the buttons.", '
-                '"recommendation": "Approve: nothing runs, it only records your answer.", "cost": "none", '
+                '"recommendation": "Approve: nothing runs, it only records your answer.", '
+                '"recommended": "approve", "why": "This is a simulated example so you can try the '
+                'buttons. No AI model wrote it and nothing will run.", '
+                '"suggested_note": "Simulated test: record my answer only.", "cost": "none", '
                 '"on_approve": {"workflow": "none", "worker": null, "goal": "", "attachments": []}, '
                 '"on_more_info": {"workflow": "none", "worker": null, "goal": ""}}]\n```'
             )

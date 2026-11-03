@@ -26,7 +26,20 @@ interface Props {
   onRetry: () => void;
 }
 
-export function RunsPanel({ hasRoom, runs, loaded, error, agentName, onCancel, onRetry }: Props) {
+const RECENT = 5;
+
+/** Active runs first, then the last few finished ones; archived runs live in History. */
+export function visibleRuns(runs: readonly Run[], showAll: boolean): { shown: Run[]; hidden: number } {
+  const live = runs.filter((r) => !r.archived_at);
+  const active = live.filter(isRunActive);
+  const done = live.filter((r) => !isRunActive(r));
+  const keep = showAll ? done : done.slice(0, RECENT);
+  return { shown: [...active, ...keep], hidden: done.length - keep.length };
+}
+
+export function RunsPanel({ hasRoom, runs: allRuns, loaded, error, agentName, onCancel, onRetry }: Props) {
+  const [showAll, setShowAll] = useState(false);
+  const { shown: runs, hidden } = visibleRuns(allRuns, showAll);
   return (
     <PanelSection title="Runs" count={hasRoom ? runs.length : undefined} testId="runs-panel">
       {!hasRoom ? (
@@ -40,6 +53,16 @@ export function RunsPanel({ hasRoom, runs, loaded, error, agentName, onCancel, o
               <RunItem key={r.id} run={r} agentName={agentName} onCancel={onCancel} />
             ))}
           </ul>
+          {(hidden > 0 || showAll) && (
+            <button
+              type="button"
+              data-testid="runs-show-all"
+              className="mt-2 text-[11px] underline"
+              onClick={() => setShowAll((v) => !v)}
+            >
+              {showAll ? "Show recent only" : `Show ${hidden} older`}
+            </button>
+          )}
           {error && (
             <p role="alert" className="mt-1 text-xs text-danger">
               {error}{" "}

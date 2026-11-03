@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatCount, formatUsd } from "@/lib/format";
-import type { Message, PrincipalKind } from "@/lib/types";
+import { foldRuns } from "@/lib/foldRuns";
+import { isRunActive, type Message, type PrincipalKind, type Run } from "@/lib/types";
 import type { PendingMessage } from "@/lib/useOutbox";
 
 const NEAR_BOTTOM_PX = 120;
@@ -51,9 +52,18 @@ interface Props {
   loading: boolean;
   onRetry: (key: string) => void;
   onDiscard: (key: string) => void;
+  /** When given, each finished workflow run is folded into one card (see foldRuns). */
+  runs?: Run[];
+  onArchive?: (runId: string) => Promise<unknown>;
 }
 
-export function MessageList({ messages, pending, loading, onRetry, onDiscard }: Props) {
+export function MessageList({ messages, pending, loading, onRetry, onDiscard, runs, onArchive }: Props) {
+  // Runs the owner watched in progress stay open after they finish; older ones start folded.
+  const [seenActive, setSeenActive] = useState<ReadonlySet<string>>(() => new Set());
+  const [openRuns, setOpenRuns] = useState<Record<string, boolean>>({});
+  const activeIds = (runs ?? []).filter(isRunActive).map((r) => r.id);
+  if (activeIds.some((id) => !seenActive.has(id))) setSeenActive(new Set([...seenActive, ...activeIds]));
+  const items = runs ? foldRuns(messages, runs) : messages.map((message) => ({ type: "message" as const, message }));
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
@@ -124,9 +134,22 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard }: 
         )}
 
         <ol className="space-y-0.5">
-          {messages.map((m) => (
-            <MessageRow key={m.id} message={m} />
-          ))}
+          {items.map((item) =>
+            item.type === "message" ? (
+              <MessageRow key={item.message.id} message={item.message} />
+            ) : (
+              <RunFold
+                key={item.runId}
+                runId={item.runId}
+                run={item.run}
+                title={item.title}
+                messages={item.messages}
+                open={openRuns[item.runId] ?? seenActive.has(item.runId)}
+                onToggle={(open) => setOpenRuns((prev) => ({ ...prev, [item.runId]: open }))}
+                onArchive={onArchive}
+              />
+            ),
+          )}
           {pending.map((p) => (
             <PendingRow key={p.key} item={p} onRetry={onRetry} onDiscard={onDiscard} />
           ))}
@@ -151,6 +174,122 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard }: 
 }
 
 const SYSTEM_NOTE_KINDS = new Set<Message["kind"]>(["task.assign", "task.status", "task.result"]);
+
+const FOLD_STATUS: Record<string, string> = {
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  budget_exceeded: "Over budget",
+};
+
+/** First line of a brief's "Bottom line" (kept here so the chat does not import panel code). */
+function briefLine(brief: string | null | undefined): string {
+  if (!brief) return "";
+  for (const raw of brief.split("\n")) {
+    const bare = raw.trim().replace(/^[#*_\s]+/, "");
+    if (/^bottom line/i.test(bare)) {
+      const rest = bare.replace(/^bottom line[*_\s]*:?[*_\s]*/i, "").trim();
+      if (rest) return rest;
+    }
+  }
+  const first = brief.split("\n").find((l) => l.trim() && !/^[#*_\s]*bottom line/i.test(l.trim()));
+  return (first ?? "")
+    .replace(/^[-*•#\s]+/, "")
+    .trim()
+    .slice(0, 300);
+}
+
+/** One finished run, folded into a single card; its full conversation opens on demand. */
+function RunFold({
+  runId,
+  run,
+  title,
+  messages,
+  open,
+  onToggle,
+  onArchive,
+}: {
+  runId: string;
+  run: Run | null;
+  title: string;
+  messages: Message[];
+  open: boolean;
+  onToggle: (open: boolean) => void;
+  onArchive?: (runId: string) => Promise<unknown>;
+}) {
+  const [archiving, setArchiving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const line = briefLine(run?.brief);
+  const archive = async () => {
+    if (!onArchive) return;
+    setArchiving(true);
+    setError(null);
+    try {
+      await onArchive(runId);
+    } catch {
+      setError("Could not archive this run.");
+      setArchiving(false);
+    }
+  };
+  return (
+    <li
+      data-testid="run-fold"
+      data-run-id={runId}
+      data-open={open}
+      className="my-2 rounded-md border border-line bg-panel"
+    >
+      <div className="flex items-start gap-2 px-3 py-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+            {run ? (FOLD_STATUS[run.status] ?? run.status) : "Earlier run"}
+            {run &&
+              ` · ${run.kind === "collab" ? "plan & review" : run.kind === "build" ? "design & build" : "review & improve"}`}
+            {run && ` · ${formatUsd(run.spent_usd)}`}
+          </p>
+          <p className="truncate font-medium" title={title}>
+            {title}
+          </p>
+          {line && (
+            <p data-testid="run-fold-line" className="mt-0.5 text-sm text-fg">
+              {line}
+            </p>
+          )}
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <button
+            type="button"
+            data-testid="run-fold-toggle"
+            aria-expanded={open}
+            onClick={() => onToggle(!open)}
+            className="rounded-md border border-line px-2 py-0.5 text-xs hover:bg-panel-2"
+          >
+            {open ? "Hide conversation" : `Show conversation (${messages.length})`}
+          </button>
+          {onArchive && run && (
+            <button
+              type="button"
+              data-testid="run-fold-archive"
+              disabled={archiving}
+              onClick={() => void archive()}
+              className="text-[11px] text-muted underline disabled:opacity-50"
+              title="Hide this run from the chat. Find it again under History."
+            >
+              Archive
+            </button>
+          )}
+        </div>
+      </div>
+      {error && <p className="px-3 pb-2 text-xs text-danger">{error}</p>}
+      {open && (
+        <ol className="space-y-0.5 border-t border-line px-2 py-2">
+          {messages.map((m) => (
+            <MessageRow key={m.id} message={m} />
+          ))}
+        </ol>
+      )}
+    </li>
+  );
+}
 
 function dataString(data: Record<string, unknown> | undefined, key: string): string | null {
   const v = data?.[key];

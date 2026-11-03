@@ -183,6 +183,8 @@ class Run(Base):
     brief: Mapped[str | None] = mapped_column(Text, nullable=True)
     pending_decisions: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     write_brief: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Hidden from the chat and the run list; still searchable in History.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint("kind in ('collab','reply','build','review')", name="run_kind"),
@@ -306,6 +308,10 @@ class Decision(Base):
     question: Mapped[str] = mapped_column(Text)
     recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)
     cost: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Plain-language background, the agents' recommended answer, and the note they suggest.
+    why: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recommended: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    suggested_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     # {"on_approve": {"workflow", "worker", "goal", "attachments"}, "on_more_info": {"goal"}}
     follow_up: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     status: Mapped[str] = mapped_column(String(16), default="pending")
@@ -318,6 +324,10 @@ class Decision(Base):
     __table_args__ = (
         CheckConstraint(
             "status in ('pending','approved','declined','more_info','dismissed')", name="decision_status"
+        ),
+        CheckConstraint(
+            "recommended is null or recommended in ('approve','decline','more_info')",
+            name="decision_recommended",
         ),
         Index("decisions_by_room", "room_id", "status", "created_at"),
     )

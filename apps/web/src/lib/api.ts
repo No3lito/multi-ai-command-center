@@ -5,6 +5,7 @@ import type {
   Decision,
   DecisionAnswerBody,
   DecisionAnswerResult,
+  HistoryResult,
   Message,
   MessagePage,
   PostMessageBody,
@@ -191,6 +192,13 @@ export const api = {
     request<Run[]>(`/api/rooms/${enc(roomId)}/runs?limit=${limit}`, { signal }),
   getRun: (runId: string, signal?: AbortSignal) => request<Run>(`/api/runs/${enc(runId)}`, { signal }),
   cancelRun: (runId: string) => request<Run>(`/api/runs/${enc(runId)}/cancel`, { method: "POST" }),
+  archiveRun: (runId: string) => request<Run>(`/api/runs/${enc(runId)}/archive`, { method: "POST" }),
+  unarchiveRun: (runId: string) => request<Run>(`/api/runs/${enc(runId)}/unarchive`, { method: "POST" }),
+  history: (roomId: string, q = "", archived: "include" | "only" | "exclude" = "include", signal?: AbortSignal) =>
+    request<HistoryResult>(
+      `/api/rooms/${enc(roomId)}/history?q=${encodeURIComponent(q)}&archived=${archived}&limit=50`,
+      { signal },
+    ),
 
   listDecisions: (roomId: string, signal?: AbortSignal) =>
     request<Decision[]>(`/api/rooms/${enc(roomId)}/decisions?status=all&limit=50`, { signal }),

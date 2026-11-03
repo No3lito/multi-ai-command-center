@@ -2,7 +2,25 @@
 
 Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
 
-## Decision cards (in review, branch `agent/claude/decision-cards`)
+## Self-serve dashboard (in review, branch `agent/claude/self-serve`)
+
+The owner asked for the Command Center to work without a go-between. So:
+
+- **Cards explain themselves:** each card has "Why it matters", the agents' suggested note already filled in, and a **Do what they recommend** button.
+- **Summary** at the top: what finished since the owner last looked, what's waiting, who is working, and the spend.
+- **Folded history:** each finished run becomes one card in the chat, with Archive. Four tabs (Decide, Runs, History with search, Setup) and a **New goal** pop-up.
+
+Contract: [`docs/api/decisions.md`](api/decisions.md), migration 0011.
+
+Evidence:
+
+- Backend: 143 passed with fake providers (new fields, inferring the recommended answer, archive and unarchive, history search with literal `%`, refusing to archive an active run). Migration round trip and `alembic check` are clean.
+- Dashboard: 114 passed.
+- Playwright: 5 passed. The browser test follows a recommendation in one click, archives a run from the chat, and restores it from History.
+
+**Not yet verified with real models.**
+
+## Decision cards (merged in PR #8)
 
 - Every "Waiting on you" item in a brief becomes a card on the dashboard, with **Approve**, **Need more info**, **Decline** and **Dismiss** buttons, an optional note, and a budget.
 - Approving (or asking for more info) starts the follow-up run the agents already prepared, at once. Grok Bot sees every answer in the room and through the new `get_decisions` MCP tool.

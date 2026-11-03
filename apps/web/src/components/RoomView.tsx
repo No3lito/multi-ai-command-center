@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, isApiError } from "@/lib/api";
-import type { Agent, Room, RoomDetail } from "@/lib/types";
+import { isRunActive, type Agent, type Room, type RoomDetail } from "@/lib/types";
 import { useAgents } from "@/lib/useAgents";
 import { useDecisions } from "@/lib/useDecisions";
 import { useOutbox } from "@/lib/useOutbox";
@@ -12,6 +12,9 @@ import { useUsage } from "@/lib/useUsage";
 import { AgentsPanel, type RoomAgent } from "./AgentsPanel";
 import { ConnectionsPanel } from "./ConnectionsPanel";
 import { DecisionsPanel } from "./DecisionsPanel";
+import { HistoryPanel } from "./HistoryPanel";
+import { Modal, RightTabs, type TabId } from "./RightTabs";
+import { SummaryPanel, lastSeenFor } from "./SummaryPanel";
 import { CollabForm } from "./CollabForm";
 import { Composer, type MentionAgent } from "./Composer";
 import { ConnectionPill } from "./ConnectionPill";
@@ -45,11 +48,15 @@ export function RoomView(props: Props) {
   const outbox = useOutbox(roomId, stream.ingest);
   const streamReady = stream.phase === "ready";
   const agentsHook = useAgents();
-  const runs = useRuns(detail.kind === "ready" ? roomId : null, stream.messages, streamReady);
+  const runs = useRuns(detail.kind === "ready" ? roomId : null, stream.messages, streamReady, { limit: 50 });
+  const [tab, setTab] = useState<TabId>("decide");
+  const [goalOpen, setGoalOpen] = useState(false);
   const usage = useUsage(stream.messages, streamReady);
   const decisions = useDecisions(detail.kind === "ready" ? roomId : null, runs.runs);
   const { answer: answerDecision } = decisions;
   const { addRun } = runs;
+  const archiveRun = useCallback(async (runId: string) => addRun(await api.archiveRun(runId)), [addRun]);
+  const closeGoal = useCallback(() => setGoalOpen(false), []);
   const onAnswer = useCallback(
     async (id: string, body: Parameters<typeof answerDecision>[1]) => {
       const result = await answerDecision(id, body);
@@ -162,6 +169,16 @@ export function RoomView(props: Props) {
           <h1 className="font-semibold text-muted">No room selected</h1>
         )}
       </div>
+      {roomId && !notFound && detail.kind === "ready" && (
+        <button
+          type="button"
+          data-testid="new-goal"
+          onClick={() => setGoalOpen(true)}
+          className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90"
+        >
+          New goal
+        </button>
+      )}
       {roomId && !notFound && <ConnectionPill status={detail.kind === "ready" ? stream.status : "connecting"} />}
       <button
         type="button"
@@ -223,6 +240,8 @@ export function RoomView(props: Props) {
           loading={detail.kind === "loading" || stream.phase === "loading"}
           onRetry={outbox.retry}
           onDiscard={outbox.discard}
+          runs={runs.runs}
+          onArchive={archiveRun}
         />
         <Composer onSend={outbox.send} disabled={detail.kind !== "ready"} roomName={roomName} agents={mentionAgents} />
       </>
@@ -241,48 +260,95 @@ export function RoomView(props: Props) {
         status={stream.status}
         lastSeq={stream.lastSeq}
         hasRoom={!!roomId && !notFound}
+        showDetails={tab === "setup"}
       >
-        {roomDetail && !notFound && (
-          <DecisionsPanel runs={runs.runs} decisions={decisions.decisions} onAnswer={onAnswer} />
+        {roomDetail && !notFound && roomId && (
+          <RightTabs
+            tab={tab}
+            onChange={setTab}
+            badges={{
+              decide: decisions.decisions.filter((d) => d.status === "pending").length,
+              runs: runs.runs.filter((r) => isRunActive(r) && !r.archived_at).length,
+            }}
+          />
         )}
-        <AgentsPanel
-          hasRoom={!!roomDetail && !notFound}
-          loading={agentsHook.state.kind === "loading"}
-          error={agentsHook.state.kind === "error" ? agentsHook.state.message : null}
-          roomAgents={roomAgents}
-          otherAgents={otherAgents}
-          onAdd={addAgent}
-          onRetry={agentsHook.reload}
-        />
-        {roomDetail && !notFound && (
+        {roomDetail && !notFound && roomId && tab === "decide" && (
+          <div role="tabpanel" id="tabpanel-decide" aria-labelledby="tab-decide">
+            <SummaryPanel
+              runs={runs.runs}
+              decisions={decisions.decisions}
+              usage={usage.usage}
+              since={lastSeenFor(roomId)}
+              agentName={agentName}
+            />
+            <DecisionsPanel runs={runs.runs} decisions={decisions.decisions} onAnswer={onAnswer} />
+          </div>
+        )}
+        {(tab === "runs" || !roomDetail || notFound) && (
+          <div role="tabpanel" id="tabpanel-runs" aria-labelledby="tab-runs">
+            <RunsPanel
+              hasRoom={!!roomDetail && !notFound}
+              runs={runs.runs}
+              loaded={runs.loaded}
+              error={runs.error}
+              agentName={agentName}
+              onCancel={runs.cancel}
+              onRetry={runs.reload}
+            />
+          </div>
+        )}
+        {roomDetail && !notFound && roomId && tab === "history" && (
+          <div role="tabpanel" id="tabpanel-history" aria-labelledby="tab-history">
+            <HistoryPanel
+              roomId={roomId}
+              client={api}
+              onRunChanged={addRun}
+              refreshKey={runs.runs
+                .filter((r) => !isRunActive(r))
+                .map((r) => `${r.id}:${r.updated_at}`)
+                .join(",")}
+            />
+          </div>
+        )}
+        {tab === "setup" && (
+          <div role="tabpanel" id="tabpanel-setup" aria-labelledby="tab-setup">
+            <AgentsPanel
+              hasRoom={!!roomDetail && !notFound}
+              loading={agentsHook.state.kind === "loading"}
+              error={agentsHook.state.kind === "error" ? agentsHook.state.message : null}
+              roomAgents={roomAgents}
+              otherAgents={otherAgents}
+              onAdd={addAgent}
+              onRetry={agentsHook.reload}
+            />
+            <UsagePanel usage={usage.usage} error={usage.error} />
+            <ConnectionsPanel
+              api={api}
+              roomId={roomDetail && !notFound ? roomId : null}
+              roomName={roomDetail?.name ?? null}
+              memberIds={memberIds}
+              onAddToRoom={addAgent}
+              onChanged={reloadDetail}
+            />
+          </div>
+        )}
+      </RightPanel>
+      {goalOpen && roomDetail && !notFound && roomId && (
+        <Modal title="New goal" onClose={closeGoal}>
           <CollabForm
             roomId={roomId}
             roomAgents={roomAgents}
             externals={externals}
             createRun={api.createRun}
             listFiles={api.listFiles}
-            onStarted={runs.addRun}
+            onStarted={(run) => {
+              addRun(run);
+              setGoalOpen(false);
+              setTab("runs");
+            }}
           />
-        )}
-        <RunsPanel
-          hasRoom={!!roomDetail && !notFound}
-          runs={runs.runs}
-          loaded={runs.loaded}
-          error={runs.error}
-          agentName={agentName}
-          onCancel={runs.cancel}
-          onRetry={runs.reload}
-        />
-        <UsagePanel usage={usage.usage} error={usage.error} />
-        <ConnectionsPanel
-          api={api}
-          roomId={roomDetail && !notFound ? roomId : null}
-          roomName={roomDetail?.name ?? null}
-          memberIds={memberIds}
-          onAddToRoom={addAgent}
-          onChanged={reloadDetail}
-        />
-      </RightPanel>
+        </Modal>
+      )}
     </>
   );
 }

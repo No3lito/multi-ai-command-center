@@ -213,6 +213,9 @@ class DecisionOut(Strict):
     run_goal: str
     question: str
     recommendation: str | None
+    recommended: Literal["approve", "decline", "more_info"] | None = None
+    why: str | None = None
+    suggested_note: str | None = None
     cost: str | None
     on_approve: FollowUpPlanOut
     on_more_info: FollowUpPlanOut
@@ -299,6 +302,7 @@ class RunOut(Strict):
     write_brief: bool = True
     brief: str | None = None
     pending_decisions: list[str] | None = None
+    archived_at: datetime | None = None
     turn_count: int
     max_turns: int
     budget_usd: float
@@ -313,6 +317,13 @@ class RunOut(Strict):
 class DecisionAnswerOut(Strict):
     decision: DecisionOut
     follow_up_run: RunOut | None
+
+
+class HistoryOut(Strict):
+    """Search results over a room's finished runs (goal and brief) and decisions."""
+
+    runs: list[RunOut]
+    decisions: list[DecisionOut]
 
 
 class UsageRow(Strict):

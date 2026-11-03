@@ -46,8 +46,7 @@ describe("DecisionsPanel", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows the latest conclusion, what is waiting on the owner, and the full brief on demand", async () => {
-    const user = userEvent.setup();
+  it("shows the latest conclusion and what is waiting on the owner", () => {
     const latest = run({
       id: `run_${"2".repeat(32)}`,
       brief: BRIEF,
@@ -62,10 +61,7 @@ describe("DecisionsPanel", () => {
       "Approve the launch coverage check (Helius credits).",
     ]);
     expect(screen.getByTestId("decision-waiting")).toHaveTextContent("(1)");
-    expect(screen.getAllByTestId("decision-brief")).toHaveLength(2);
-    expect(screen.queryByTestId("decision-brief-full")).not.toBeInTheDocument();
-    await user.click(screen.getByText("Earlier result."));
-    expect(screen.getByTestId("decision-brief-full")).toHaveTextContent("Earlier result.");
+    expect(screen.queryByTestId("decision-brief")).not.toBeInTheDocument(); // past briefs live in History
   });
 
   it("says plainly when nothing is waiting", () => {
@@ -145,5 +141,40 @@ describe("decision cards", () => {
     expect(item).toHaveTextContent("Approved");
     expect(item).toHaveTextContent("Note: cap 50k");
     expect(item).toHaveTextContent("Follow-up run started");
+  });
+});
+
+describe("self-explaining cards", () => {
+  const briefed = run({ brief: "**Bottom line:** Retest H123." });
+  const explained = decision({
+    recommended: "more_info",
+    why: "The audit decides whether the retests can run at all.",
+    suggested_note: "Run the zero-credit replay test first.",
+  });
+
+  it("explains itself and fills in the agents' note", () => {
+    render(<DecisionsPanel runs={[briefed]} decisions={[explained]} onAnswer={vi.fn()} />);
+    expect(screen.getByTestId("decision-why")).toHaveTextContent("Why it matters: The audit decides");
+    expect(screen.getByTestId("decision-note")).toHaveValue("Run the zero-credit replay test first.");
+    expect(screen.getByTestId("decision-follow")).toHaveTextContent(
+      "Do what they recommend: Need more info (with the note)",
+    );
+  });
+
+  it("follows the recommendation with the (edited) note in one click", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn().mockResolvedValue({});
+    render(<DecisionsPanel runs={[briefed]} decisions={[explained]} onAnswer={onAnswer} />);
+    await user.type(screen.getByTestId("decision-note"), " Cap 25k.");
+    await user.click(screen.getByTestId("decision-follow"));
+    expect(onAnswer).toHaveBeenCalledWith(explained.id, {
+      answer: "more_info",
+      note: "Run the zero-credit replay test first. Cap 25k.",
+    });
+  });
+
+  it("has no follow button when the agents gave no clear recommendation", () => {
+    render(<DecisionsPanel runs={[briefed]} decisions={[decision({ recommended: null })]} onAnswer={vi.fn()} />);
+    expect(screen.queryByTestId("decision-follow")).not.toBeInTheDocument();
   });
 });
