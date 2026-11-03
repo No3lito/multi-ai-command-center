@@ -487,8 +487,9 @@ class CodeSteps:
                         ),
                         why=(
                             f"{writer} wrote this change to the Command Center's code and {reviewer} "
-                            f"reviewed it. {tests} Approving merges it on GitHub; you then rebuild the "
-                            "Command Center to use it. Declining closes the pull request."
+                            f"reviewed it. {tests} Approving merges it on GitHub, and the automatic "
+                            "updater loads it on your computer within about 5 minutes. Declining closes "
+                            "the pull request."
                         ),
                         recommended=recommended,
                         recommendation=rec,

@@ -922,7 +922,11 @@ def register(
                         f"Not merged: pull request #{pr.number} {why or 'has no reviewed commit on record'}.",
                     )
                 await gh.merge(pr.number, pr.title or f"Pull request #{pr.number}", str(raw["head_sha"]))
-                return f"Merged pull request #{pr.number} on GitHub. Rebuild the Command Center to use it."
+                return (
+                    f"Merged pull request #{pr.number} on GitHub. With automatic updates on, this computer "
+                    "loads it within about 5 minutes; otherwise run git pull and "
+                    "docker compose up -d --build."
+                )
             if live.get("state") != "open":
                 return f"Pull request #{pr.number} was already closed on GitHub."
             await gh.close(pr.number)
