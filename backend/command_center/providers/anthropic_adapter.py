@@ -48,6 +48,7 @@ class AnthropicAdapter:
                 system=req.system,
                 messages=[_message(m.role, m.content) for m in req.messages],
                 output_config=self._output_config,
+                timeout=req.timeout_seconds if req.timeout_seconds else anthropic.NOT_GIVEN,
             )
         except anthropic.AuthenticationError as exc:
             raise ProviderError(

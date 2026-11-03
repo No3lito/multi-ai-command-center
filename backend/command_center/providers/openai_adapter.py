@@ -55,6 +55,7 @@ class OpenAIAdapter:
                     input=with_system,
                     max_output_tokens=req.max_output_tokens,
                     store=False,  # do not keep conversation state on the provider's side
+                    timeout=req.timeout_seconds if req.timeout_seconds else openai.NOT_GIVEN,
                 )
             else:
                 resp = await self._client.responses.create(
@@ -63,6 +64,7 @@ class OpenAIAdapter:
                     input=messages,
                     max_output_tokens=req.max_output_tokens,
                     store=False,  # do not keep conversation state on the provider's side
+                    timeout=req.timeout_seconds if req.timeout_seconds else openai.NOT_GIVEN,
                 )
         except openai.AuthenticationError as exc:
             raise ProviderError(

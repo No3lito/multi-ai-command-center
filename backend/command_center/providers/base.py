@@ -33,6 +33,9 @@ class ChatRequest:
     system: str
     messages: list[ChatMessage]
     max_output_tokens: int
+    # Longer steps (a code job writing several files) may wait longer than the default for an
+    # answer. None: the adapter's and the platform's defaults.
+    timeout_seconds: float | None = None
 
     def prompt_chars(self) -> int:
         return len(self.system) + sum(len(m.content) for m in self.messages)

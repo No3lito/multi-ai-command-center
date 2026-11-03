@@ -214,6 +214,7 @@ export const api = {
   getRun: (runId: string, signal?: AbortSignal) => request<Run>(`/api/runs/${enc(runId)}`, { signal }),
   cancelRun: (runId: string) => request<Run>(`/api/runs/${enc(runId)}/cancel`, { method: "POST" }),
   wrapUpRun: (runId: string) => request<Run>(`/api/runs/${enc(runId)}/wrap-up`, { method: "POST" }),
+  tryAgainRun: (runId: string) => request<Run>(`/api/runs/${enc(runId)}/try-again`, { method: "POST" }),
   archiveRun: (runId: string) => request<Run>(`/api/runs/${enc(runId)}/archive`, { method: "POST" }),
   unarchiveRun: (runId: string) => request<Run>(`/api/runs/${enc(runId)}/unarchive`, { method: "POST" }),
   history: (roomId: string, q = "", archived: "include" | "only" | "exclude" = "include", signal?: AbortSignal) =>
