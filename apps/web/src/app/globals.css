@@ -39,12 +39,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Phones: iOS stops zooming into inputs at 16px. */
-@media (max-width: 640px) {
+/* Phones: body text is 16px; this also stops iOS zooming into inputs. */
+@media (max-width: 767px) {
+  body {
+    font-size: var(--text-body-phone);
+  }
   input,
   textarea,
   select {
-    font-size: 16px;
+    font-size: var(--text-body-phone);
   }
 }
 

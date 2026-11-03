@@ -44,6 +44,13 @@ describe("tokens.css", () => {
     expect(token(dark, "--accent")).toBe("#e0679e");
   });
 
+  it("uses 16px body text on phone screens", () => {
+    expect(css).toMatch(/--text-body-phone: 16px/);
+    const globals = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+    const m = /@media \(max-width: 767px\) \{\s*body \{\s*font-size: var\(--text-body-phone\);/.exec(globals);
+    expect(m).not.toBeNull();
+  });
+
   it("is dark by default and light only when selected explicitly", () => {
     expect(css).not.toContain("prefers-color-scheme");
     expect(dark).toContain("color-scheme: dark");
