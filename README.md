@@ -75,6 +75,12 @@ CI runs all of these on every push and pull request (`.github/workflows/ci.yml`)
 | `docs/phase-1-technical-discovery.md` | Approved architecture |
 | `tests/e2e/` | Playwright browser tests |
 
+## How code changes are made
+
+Claude and ChatGPT work together on every change. One agent writes it on a branch and opens a pull request; the other reviews it and reports problems, and the author fixes them.
+
+Nothing merges on its own. The owner approves each change with one click on the **Approve** button in the dashboard's Decisions panel. See [`docs/api/decisions.md`](docs/api/decisions.md).
+
 ## For AI collaborators
 
 Read [`AGENTS.md`](AGENTS.md) first. Claude Code also reads [`CLAUDE.md`](CLAUDE.md).
