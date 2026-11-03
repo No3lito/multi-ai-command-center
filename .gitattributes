@@ -1,3 +1,2 @@
-# Windows scripts keep Windows line endings on every checkout.
-*.ps1 text eol=crlf
+# The VBScript launcher keeps Windows line endings on every checkout.
 *.vbs text eol=crlf
