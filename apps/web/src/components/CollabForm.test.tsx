@@ -293,3 +293,8 @@ describe("CollabForm file suggestions", () => {
     );
   });
 });
+
+it("tells the owner how to get suggestions in a room without a project", () => {
+  render(<CollabForm roomId={ROOM_A} roomAgents={both} createRun={vi.fn()} onStarted={() => {}} noProjectHint />);
+  expect(screen.getByTestId("collab-no-project")).toHaveTextContent("Link one under Setup");
+});

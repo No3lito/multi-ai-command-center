@@ -78,6 +78,8 @@ interface Props {
   suggestDelayMs?: number;
   /** The room's project folder: the file browser opens there. */
   projectPath?: string | null;
+  /** A workspace exists but this room has no project: say how to link one. */
+  noProjectHint?: boolean;
 }
 
 export function CollabForm({
@@ -91,6 +93,7 @@ export function CollabForm({
   suggestFiles,
   suggestDelayMs = 600,
   projectPath = null,
+  noProjectHint = false,
 }: Props) {
   const usable = roomAgents.filter((r) => r.agent && isAgentUsable(r.agent));
   const [goal, setGoal] = useState("");
@@ -331,6 +334,11 @@ export function CollabForm({
               and rules are always included)
             </span>
           </label>
+        )}
+        {noProjectHint && (
+          <p className="text-[11px] text-warn" data-testid="collab-no-project">
+            This room has no project folder, so no files are suggested. Link one under Setup → Project folder.
+          </p>
         )}
         {always.length > 0 && (
           <p className="text-[11px] text-muted" data-testid="collab-always">

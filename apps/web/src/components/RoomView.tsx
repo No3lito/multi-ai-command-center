@@ -374,6 +374,7 @@ export function RoomView(props: Props) {
             listFiles={api.listFiles}
             projectTitle={projectTitle(workspace, roomDetail.project_path)}
             projectPath={roomDetail.project_path ?? null}
+            noProjectHint={workspace.structured && !roomDetail.project_path}
             suggestFiles={
               roomDetail.project_path ? (goal, signal) => api.suggestFiles(roomId, goal, signal) : undefined
             }
