@@ -450,6 +450,7 @@ class BuiltinEngine:
         reply_to: str | None,
         max_output_tokens: int | None = None,
         postprocess: Callable[[str], str] | None = None,
+        timeout_seconds: float | None = None,
     ) -> str | None:
         """One model call plus the agent's message. Returns the message id, or None if the run ended.
 
@@ -504,6 +505,8 @@ class BuiltinEngine:
             )
             if max_output_tokens is not None:
                 req = replace(req, max_output_tokens=max_output_tokens)
+            if timeout_seconds is not None:
+                req = replace(req, timeout_seconds=timeout_seconds)
             name = agent.display_name
         try:
             result = await self.models.call(profile, req, run_id=run.id, simulated=run.simulated)

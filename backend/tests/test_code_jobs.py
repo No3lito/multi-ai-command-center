@@ -6,16 +6,19 @@ and the limits, not the quality of real model output or GitHub's real behavior.
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 from pydantic import SecretStr
 from sqlalchemy import select
 
@@ -25,7 +28,7 @@ from command_center.db import models
 from command_center.ids import new_id
 from command_center.orchestrator.code_steps import parse_files, parse_review
 from command_center.orchestrator.engine import BuiltinEngine
-from command_center.providers.base import ChatRequest, ChatResponse
+from command_center.providers.base import ChatRequest, ChatResponse, ProviderError
 from tests.conftest import BACKEND, _free_port, run_server
 from tests.fake_github import REPO, SAMPLE_FILES, TOKEN, FakeRepo, make_app
 from tests.test_coordinator import logged_in
@@ -165,6 +168,7 @@ class Scripted:
         self.writes, self.reviews = list(writes), list(reviews)
         self.scope = scope or 'Approach: fix the sign.\n```files\n["app/calc.py", "tests/test_calc.py"]\n```'
         self.prompts: list[tuple[str, str]] = []
+        self.timeouts: list[tuple[str, float | None]] = []
 
     def capabilities(self, model: str):  # type: ignore[no-untyped-def]
         return None
@@ -178,6 +182,7 @@ class Scripted:
         else:
             kind, text = "write", self.writes.pop(0)
         self.prompts.append((kind, prompt))
+        self.timeouts.append((kind, req.timeout_seconds))
         return ChatResponse(text=text, input_tokens=2000, output_tokens=800, model=req.model)
 
 
@@ -627,3 +632,81 @@ async def test_a_job_from_a_discussion_sees_the_agreed_spec(world: dict[str, Any
                 break
     assert [k for k, _ in adapter.prompts] == ["scope", "write", "review"]
     assert all("sidebar 248px" in prompt for _, prompt in adapter.prompts)
+
+
+async def test_code_steps_wait_longer_than_chat_answers(world: dict[str, Any]) -> None:  # noqa: F811
+    """Writing several files takes minutes: the 90-second chat default made a real job fail."""
+    adapter = Scripted(writes=[FIX_SIGN], reviews=["Good.\nVERDICT: APPROVE"])
+    run, _ = await code_job(world, adapter, FakeRepo(SAMPLE_FILES))
+    assert run.status == "completed"
+    assert adapter.timeouts == [("scope", 240.0), ("write", 600.0), ("review", 360.0)]
+
+
+async def test_the_model_port_honors_a_longer_step_timeout(world: dict[str, Any]) -> None:  # noqa: F811
+    class Slow(Scripted):
+        async def generate(self, req: ChatRequest) -> ChatResponse:
+            await asyncio.sleep(1.5)
+            return ChatResponse(text="done", input_tokens=10, output_tokens=10, model=req.model)
+
+    settings = cfg(world["url"]).model_copy(update={"provider_call_timeout_seconds": 1.0})
+    port = await port_for(world["sm"], settings, Slow([], []))
+    async with world["sm"]() as s:
+        prof = await s.get(models.AgentProfile, world["agents"]["Claude"].id)
+    assert prof is not None
+    req = ChatRequest(model=prof.model, system="s", messages=[], max_output_tokens=100)
+    with pytest.raises(ProviderError):
+        await port.call(prof, req, run_id=None)
+    ok = await port.call(prof, replace(req, timeout_seconds=5.0), run_id=None)
+    assert ok.response.text == "done"
+
+
+async def test_try_again_restarts_a_failed_code_job(fresh_database_url: str, tmp_path: Path) -> None:
+    env = {"GITHUB_TOKEN": TOKEN, "GITHUB_API_URL": "http://127.0.0.1:9", "CODE_REPO": REPO}
+    with run_server(fresh_database_url, tmp_path, **env) as srv:
+        async with logged_in(srv) as c:
+            rooms = (await c.get("/api/rooms")).json()
+            room_id = next(r["id"] for r in rooms if r["name"] == "General")
+            me = (await c.get("/api/auth/me")).json()
+            agents = {a["display_name"]: a for a in (await c.get("/api/agents")).json()}
+            from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+            eng = create_async_engine(fresh_database_url.replace("postgresql://", "postgresql+asyncpg://", 1))
+            ids = {}
+            async with async_sessionmaker(eng)() as s:
+                for name, kind, status, state in [
+                    ("plain", "code", "failed", {"context": "SPEC v2",
+                                                  "last_answer": {"key": "write0", "text": "x"}}),
+                    ("with_pr", "code", "failed", {"context": "SPEC v2", "pr": {"number": 4, "url": "u"},
+                                                    "branch": "agent/command-center/x", "head_sha": "abc",
+                                                    "base": "main", "base_sha": "def", "touched": ["a.py"]}),
+                    ("collab", "collab", "failed", None),
+                    ("done", "code", "completed", {"context": "x"}),
+                ]:  # fmt: skip
+                    rid = new_id("run")
+                    ids[name] = rid
+                    s.add(
+                        models.Run(
+                            id=rid, root_run_id=rid, room_id=room_id, kind=kind, status=status, step="write",
+                            goal="Apply the v2 spec", planner_id=agents["GPT"]["id"],
+                            critic_id=agents["Claude"]["id"], budget_usd=Decimal(3),
+                            spent_usd=Decimal("0.33"),
+                            created_by=me["id"], max_turns=8, code_state=state,
+                        )
+                    )  # fmt: skip
+                await s.commit()
+            await eng.dispose()
+            r = await c.post(f"/api/runs/{ids['plain']}/try-again")
+            assert r.status_code == 201, r.text
+            again = r.json()
+            assert (again["kind"], again["step"], again["budget_usd"]) == ("code", "scope", 3.0)
+            assert (again["planner_id"], again["critic_id"]) == (agents["GPT"]["id"], agents["Claude"]["id"])
+            assert (await c.post(f"/api/runs/{ids['plain']}/try-again")).json()["error"][
+                "code"
+            ] == "already_retried"
+            r = await c.post(f"/api/runs/{ids['with_pr']}/try-again")
+            assert r.status_code == 201 and r.json()["step"] == "ci" and r.json()["code_pr"]["number"] == 4
+            assert (await c.post(f"/api/runs/{ids['collab']}/try-again")).status_code == 422
+            assert (await c.post(f"/api/runs/{ids['done']}/try-again")).json()["error"][
+                "code"
+            ] == "run_not_finished"
+            await c.post(f"/api/runs/{again['id']}/cancel")

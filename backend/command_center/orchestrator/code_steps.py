@@ -37,6 +37,10 @@ log = logging.getLogger(__name__)
 WRITE_MAX_TOKENS = 16_000
 SCOPE_MAX_TOKENS = 4_000
 REVIEW_MAX_TOKENS = 10_000
+# Writing several files can take minutes; the defaults (90 to 120 seconds) are for chat answers.
+SCOPE_TIMEOUT_SECONDS = 240.0
+WRITE_TIMEOUT_SECONDS = 600.0
+REVIEW_TIMEOUT_SECONDS = 360.0
 CI_START_GRACE_SECONDS = 180  # no CI run after this long: the repository has none for this branch
 STEP_POLL_SLICE_SECONDS = 60  # one CI wait slice; the worker is free between slices
 _FILES_BLOCK = re.compile(r"```files\s*\n(\[[\s\S]*?\])\s*```", re.IGNORECASE)
@@ -191,6 +195,7 @@ class CodeSteps:
             "scope",
             assign,
             SCOPE_MAX_TOKENS,
+            timeout_seconds=SCOPE_TIMEOUT_SECONDS,
         )
         if msg is None or msg == "__waiting__":
             return False
@@ -272,6 +277,7 @@ class CodeSteps:
             assign,
             WRITE_MAX_TOKENS,
             postprocess=lambda t: _summary(t),
+            timeout_seconds=WRITE_TIMEOUT_SECONDS,
         )
         if msg is None or msg == "__waiting__":
             return False
@@ -428,6 +434,7 @@ class CodeSteps:
             f"review{rnd}",
             assign,
             REVIEW_MAX_TOKENS,
+            timeout_seconds=REVIEW_TIMEOUT_SECONDS,
         )
         if msg is None or msg == "__waiting__":
             return False

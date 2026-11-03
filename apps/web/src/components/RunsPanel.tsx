@@ -27,6 +27,8 @@ interface Props {
   onRetry: () => void;
   /** Ask an active plan, build or review to conclude now. */
   onWrapUp?: (runId: string) => Promise<unknown>;
+  /** Start a failed code job again (keeps the agreed spec and any open pull request). */
+  onTryAgain?: (runId: string) => Promise<unknown>;
 }
 
 const RECENT = 5;
@@ -40,7 +42,17 @@ export function visibleRuns(runs: readonly Run[], showAll: boolean): { shown: Ru
   return { shown: [...active, ...keep], hidden: done.length - keep.length };
 }
 
-export function RunsPanel({ hasRoom, runs: allRuns, loaded, error, agentName, onCancel, onRetry, onWrapUp }: Props) {
+export function RunsPanel({
+  hasRoom,
+  runs: allRuns,
+  loaded,
+  error,
+  agentName,
+  onCancel,
+  onRetry,
+  onWrapUp,
+  onTryAgain,
+}: Props) {
   const [showAll, setShowAll] = useState(false);
   const { shown: runs, hidden } = visibleRuns(allRuns, showAll);
   return (
@@ -53,7 +65,14 @@ export function RunsPanel({ hasRoom, runs: allRuns, loaded, error, agentName, on
           {loaded && runs.length === 0 && !error && <p className="text-xs text-muted">No runs yet.</p>}
           <ul className="space-y-2">
             {runs.map((r) => (
-              <RunItem key={r.id} run={r} agentName={agentName} onCancel={onCancel} onWrapUp={onWrapUp} />
+              <RunItem
+                key={r.id}
+                run={r}
+                agentName={agentName}
+                onCancel={onCancel}
+                onWrapUp={onWrapUp}
+                onTryAgain={onTryAgain}
+              />
             ))}
           </ul>
           {(hidden > 0 || showAll) && (
@@ -85,11 +104,13 @@ function RunItem({
   agentName,
   onCancel,
   onWrapUp,
+  onTryAgain,
 }: {
   run: Run;
   agentName: (id: string | null) => string | null;
   onCancel: (runId: string) => Promise<unknown>;
   onWrapUp?: (runId: string) => Promise<unknown>;
+  onTryAgain?: (runId: string) => Promise<unknown>;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +134,22 @@ function RunItem({
             ? `${agentName(run.planner_id) ?? "writer"} writes, ${agentName(run.critic_id) ?? "reviewer"} reviews`
             : agentName(run.agent_id);
   const waitingFor = run.status === "waiting" ? (agentName(run.waiting_for ?? null) ?? "an external agent") : null;
+
+  const canTryAgain =
+    !!onTryAgain && run.kind === "code" && ["failed", "budget_exceeded", "cancelled"].includes(run.status);
+
+  async function tryAgain() {
+    if (!onTryAgain) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onTryAgain(run.id);
+    } catch (e) {
+      setError(isApiError(e) ? e.message : "Could not start it again.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function wrapUp() {
     if (!onWrapUp) return;
@@ -160,6 +197,18 @@ function RunItem({
           </span>
         )}
         <VerdictPill verdict={run.verdict} />
+        {canTryAgain && (
+          <button
+            type="button"
+            data-testid="run-try-again"
+            onClick={() => void tryAgain()}
+            disabled={busy}
+            title="Start this code job again with the same goal and agreed spec"
+            className="ml-auto rounded bg-accent px-1.5 py-px text-[11px] font-medium text-white disabled:opacity-50"
+          >
+            {busy ? "Starting" : "Try again"}
+          </button>
+        )}
         {active && onWrapUp && run.kind !== "reply" && (
           <button
             type="button"

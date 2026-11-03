@@ -300,7 +300,7 @@ class ModelPort:
         adapter = self._adapter(profile.provider)
         worst = price.cost(estimate_input_tokens(req.prompt_bytes()), req.max_output_tokens)
         reservation_id = await self._reserve(run_id, worst)
-        timeout = self.settings.provider_call_timeout_seconds
+        timeout = max(self.settings.provider_call_timeout_seconds, req.timeout_seconds or 0)
         try:
             try:
                 resp = await asyncio.wait_for(adapter.generate(req), timeout)

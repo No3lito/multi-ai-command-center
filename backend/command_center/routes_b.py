@@ -606,6 +606,67 @@ def register(
         wake()
         return run_out(run, (await attachments_for(session, [run.id])).get(run.id))
 
+    @app.post("/api/runs/{run_id}/try-again", response_model=RunOut, status_code=201)
+    async def try_again(
+        run_id: str, request: Request, principal: PrincipalDep, session: SessionDep
+    ) -> RunOut:
+        """Start a failed or stopped code job again: same goal, writer, reviewer and agreed spec.
+        With a pull request already open it continues it (tests, then review); otherwise it
+        starts over by picking files. A fresh job budget applies; the instance cap still holds."""
+        require_owner(principal)
+        old = await session.get(models.Run, run_id, with_for_update=True)
+        if old is None:
+            raise api_error(404, "run_not_found", "Run not found")
+        await member_room(session, old.room_id, principal)
+        if old.kind != "code":
+            raise api_error(422, "validation_error", "Only code jobs can be started again this way.")
+        if old.status not in ("failed", "budget_exceeded", "cancelled"):
+            raise api_error(
+                409, "run_not_finished", "Only a failed or stopped code job can be started again."
+            )
+        if not settings.code_jobs_enabled:
+            raise api_error(409, "code_jobs_off", "Code jobs are off: no GitHub token is set.")
+        again = await session.scalar(
+            select(models.Run.id).where(models.Run.code_state["retry_of"].astext == old.id).limit(1)
+        )
+        if again is not None:
+            raise api_error(409, "already_retried", "This code job was already started again.")
+        prev: dict[str, Any] = dict(old.code_state or {})
+        keep = ("context",) + (
+            ("base", "base_sha", "branch", "head_sha", "pr", "files", "touched", "round")
+            if prev.get("pr")
+            else ()
+        )
+        state: dict[str, Any] = {k: prev[k] for k in keep if k in prev}
+        state["retry_of"] = old.id
+        new_id_ = new_id("run")
+        run = models.Run(
+            id=new_id_,
+            root_run_id=new_id_,
+            chain_root_id=old.chain_root_id,
+            chain_depth=old.chain_depth or 0,
+            room_id=old.room_id,
+            kind="code",
+            status="queued",
+            step="ci" if state.get("pr") else "scope",
+            goal=old.goal,
+            planner_id=old.planner_id,
+            critic_id=old.critic_id,
+            max_turns=8,
+            budget_usd=Decimal(str(settings.code_job_budget_usd)),
+            spent_usd=Decimal(0),
+            simulated=settings.provider_mode == "simulated",
+            write_brief=False,
+            agent_files=False,
+            code_state=state,
+            created_by=principal.id,
+        )
+        session.add(run)
+        await session.commit()
+        await audit(session, "run.try_again", principal.id, run.id, request, previous=old.id)
+        wake()
+        return run_out(run)
+
     @app.post("/api/runs/{run_id}/cancel", response_model=RunOut)
     async def cancel_run(
         run_id: str, request: Request, principal: PrincipalDep, session: SessionDep

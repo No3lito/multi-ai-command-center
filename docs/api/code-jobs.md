@@ -40,6 +40,14 @@ Writer and reviewer take turns: Claude writes on even-numbered jobs, GPT on odd 
 - Every model call goes through the budget (job, then instance-wide cap) before it is sent. Code jobs are not counted in the $2 follow-up chain budget; each send-back needs the owner's click and has its own job budget (a dollar cap in the note lowers it).
 - Without a token, the dashboard shows the option as off with the reason, and the API returns `409 code_jobs_off`.
 
+## Waiting for the models
+
+Code job steps wait longer than chat answers: picking files 4 minutes, writing 10 minutes, reviewing 6 minutes (the first real job failed at the 90-second chat default). A timed-out call is still counted as billed.
+
+## Trying again
+
+`POST /api/runs/{id}/try-again` (dashboard: **Try again** on a failed, budget-stopped or cancelled code job) starts a new job with the same goal, writer, reviewer and agreed spec, and a fresh job budget. With a pull request already open it continues it (tests, then review); otherwise it starts by picking files. Each job can be started again once.
+
 ## Starting one
 
 - **Dashboard:** New goal → Workflow → *Code change*.
