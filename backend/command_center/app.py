@@ -26,7 +26,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from command_center import auth, routes_b
+from command_center import auth, code_jobs, routes_b
 from command_center.config import Settings, get_settings
 from command_center.db import models
 from command_center.db.session import Database
@@ -232,6 +232,9 @@ def create_app(config: Settings | None = None) -> FastAPI:
             workspace=lambda: open_workspace(settings.files_root, settings.sources_root),
             attachment_max_files=settings.attachment_max_files,
             attachment_max_chars=settings.attachment_max_chars,
+            github=lambda: code_jobs.github_from(settings),
+            code_ci_wait_seconds=settings.code_ci_wait_minutes * 60,
+            code_ci_poll_seconds=settings.code_ci_poll_seconds,
         )
         worker = RunWorker(
             db.sessionmaker,

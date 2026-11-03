@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from command_center import decisions as decisions_mod
 from command_center import files, project_files
+from command_center.code_jobs import GitHubError, check_pr_for_merge, github_from
 from command_center.config import Settings
 from command_center.db import models
 from command_center.db.session import Database
@@ -24,6 +25,8 @@ from command_center.protocol import (
     AgentOut,
     AgentPatch,
     AttachmentOut,
+    CodeJobsOut,
+    CodePrOut,
     ConnectionIn,
     ConnectionOut,
     ConnectionRoom,
@@ -160,6 +163,7 @@ def run_out(r: models.Run, attachments: list[AttachmentOut] | None = None) -> Ru
         chain_root_id=r.chain_root_id,
         chain_depth=r.chain_depth or 0,
         wrap_up=bool(r.wrap_up),
+        code_pr=_code_pr((r.code_state or {}).get("pr")),
         id=r.id,
         room_id=r.room_id,
         kind=r.kind,
@@ -227,7 +231,14 @@ def decision_out(d: models.Decision, run_goal: str) -> DecisionOut:
         decided_at=d.decided_at,
         follow_up_run_id=d.follow_up_run_id,
         created_at=d.created_at,
+        code_pr=_code_pr(follow.get("code_pr")),
     )
+
+
+def _code_pr(raw: object) -> CodePrOut | None:
+    if not isinstance(raw, dict) or "number" not in raw or "url" not in raw:
+        return None
+    return CodePrOut(number=int(raw["number"]), url=str(raw["url"]), title=str(raw.get("title") or ""))
 
 
 ANSWER_STATUS = {
@@ -376,6 +387,16 @@ def register(
         )
         build = body.workflow == "build"
         review = body.workflow == "review"
+        code = body.workflow == "code"
+        if code and not settings.code_jobs_enabled:
+            raise api_error(
+                409,
+                "code_jobs_off",
+                "Code jobs are off: add a GitHub token limited to the Command Center repository "
+                "(GITHUB_TOKEN in .env) and restart.",
+            )
+        if code and body.attachments:
+            raise api_error(422, "validation_error", "attachments: code jobs read the repository instead")
         roles = [("planner", body.planner_id), ("critic", body.critic_id)]
         if build or review:
             if body.builder_id is None:
@@ -421,6 +442,17 @@ def register(
                     f"attachments: {total:,} characters in total; "
                     f"the limit is {settings.attachment_max_chars:,}",
                 )
+        planner_id, critic_id = body.planner_id, body.critic_id
+        if code:
+            # The coding team is this room's Claude and GPT agents; they take turns writing.
+            pair = await decisions_mod.code_pair(session, room_id, settings)
+            if pair is None or {pair[0].id, pair[1].id} != {planner_id, critic_id}:
+                raise api_error(
+                    422,
+                    "validation_error",
+                    "A code job needs this room's Claude and GPT agents, both able to run.",
+                )
+            planner_id, critic_id = pair[0].id, pair[1].id
         run_id = new_id("run")
         run = models.Run(
             id=run_id,
@@ -428,23 +460,27 @@ def register(
             room_id=room_id,
             kind=body.workflow,
             status="queued",
-            step="select"
+            step="scope"
+            if code
+            else "select"
             if project_room
             else {"build": "design", "review": "share"}.get(body.workflow, "plan"),
             goal=body.goal.strip(),
-            planner_id=body.planner_id,
-            critic_id=body.critic_id,
+            planner_id=planner_id,
+            critic_id=critic_id,
             builder_id=body.builder_id,
             # Agent turns needed: build 7, review 5, plan & review 3, plus one for the brief.
-            max_turns=max(
+            max_turns=8
+            if code
+            else max(
                 body.max_turns,
                 (7 if build else 5 if review else 3)
                 + (1 if body.brief else 0)
                 + (1 if project_room and body.agent_files else 0),
             ),
-            write_brief=body.brief,
-            agent_files=body.agent_files,
-            budget_usd=Decimal(str(body.budget_usd)),
+            write_brief=body.brief and not code,
+            agent_files=body.agent_files and not code,
+            budget_usd=Decimal(str(settings.code_job_budget_usd if code else body.budget_usd)),
             spent_usd=Decimal(0),
             simulated=settings.provider_mode == "simulated",
             created_by=principal.id,
@@ -745,7 +781,7 @@ def register(
                 item.final_round = (
                     source is not None and (source.chain_depth or 0) >= decisions_mod.MAX_ROUNDS
                 )
-                item.cannot_run_reason = await decisions_mod.plan_check(session, d, "approve")
+                item.cannot_run_reason = await decisions_mod.plan_check(session, d, "approve", settings)
             out.append(item)
         return out
 
@@ -768,6 +804,7 @@ def register(
         note = (body.note or "").strip() or None
         follow_up: models.Run | None = None
         no_run_reason: str | None = None
+        code_result = await answer_code_pr(decision, body.answer)
         if body.answer in ("approve", "more_info"):
             try:
                 result = await decisions_mod.start_follow_up(
@@ -821,6 +858,8 @@ def register(
             text = f"Owner {ANSWER_WORDS[body.answer]}: {decision.question}"
             if note:
                 text += f"\nNote: {note}"
+            if code_result:
+                text += f"\n{code_result}"
             if follow_up is not None:
                 text += f"\nStarted a {follow_up.kind} run (budget ${float(follow_up.budget_usd):.2f})."
             elif no_run_reason:
@@ -853,6 +892,60 @@ def register(
             decision=decision_out(decision, source_goal),
             follow_up_run=run_out(follow_up, run_attachments) if follow_up is not None else None,
             no_run_reason=no_run_reason,
+            code_result=code_result,
+        )
+
+    async def answer_code_pr(decision: models.Decision, answer: str) -> str | None:
+        """A finished code job's card: approve merges the pull request, decline closes it.
+        A failed merge raises, so the card stays open and nothing is recorded."""
+        raw = (decision.follow_up or {}).get("code_pr") or {}
+        pr = _code_pr(raw)
+        if pr is None or answer not in ("approve", "decline"):
+            return None
+        gh = github_from(settings)
+        if gh is None:
+            if answer == "approve":
+                raise api_error(
+                    409, "code_jobs_off", "No GitHub token is set, so the pull request cannot be merged."
+                )
+            return f"Pull request #{pr.number} was not closed on GitHub (no token is set)."
+        try:
+            live = await gh.pr_state(pr.number)
+            if answer == "approve":
+                if live.get("merged"):
+                    return f"Pull request #{pr.number} was already merged on GitHub."
+                why = check_pr_for_merge(live, str(raw.get("head_sha") or ""), str(raw.get("base") or "main"))
+                if why or not raw.get("head_sha"):
+                    raise api_error(
+                        409,
+                        "merge_refused",
+                        f"Not merged: pull request #{pr.number} {why or 'has no reviewed commit on record'}.",
+                    )
+                await gh.merge(pr.number, pr.title or f"Pull request #{pr.number}", str(raw["head_sha"]))
+                return f"Merged pull request #{pr.number} on GitHub. Rebuild the Command Center to use it."
+            if live.get("state") != "open":
+                return f"Pull request #{pr.number} was already closed on GitHub."
+            await gh.close(pr.number)
+            return f"Closed pull request #{pr.number} on GitHub."
+        except GitHubError as exc:
+            if answer == "approve":
+                raise api_error(
+                    409, "merge_failed", f"GitHub did not merge pull request #{pr.number}: {exc.message}"
+                ) from exc
+            return f"Could not close pull request #{pr.number} on GitHub: {exc.message}"
+        finally:
+            await gh.aclose()
+
+    @app.get("/api/code-jobs", response_model=CodeJobsOut)
+    async def code_jobs_status(principal: PrincipalDep) -> CodeJobsOut:
+        require_owner(principal)
+        return CodeJobsOut(
+            enabled=settings.code_jobs_enabled,
+            repo=settings.code_repo,
+            budget_usd=settings.code_job_budget_usd,
+            reason=None
+            if settings.code_jobs_enabled
+            else "Add a GitHub token limited to this repository (GITHUB_TOKEN in .env) and restart.",
         )
 
     # ------------------------------------------------------------ archive and history

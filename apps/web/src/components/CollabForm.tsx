@@ -8,6 +8,7 @@ import {
   RUN_BUDGET_MAX,
   RUN_MAX_TURNS_DEFAULT,
   isAgentUsable,
+  type CodeJobs,
   type CreateRunBody,
   type FilesListing,
   type Principal,
@@ -80,6 +81,8 @@ interface Props {
   projectPath?: string | null;
   /** A workspace exists but this room has no project: say how to link one. */
   noProjectHint?: boolean;
+  /** Code jobs (Claude and GPT change the Command Center's code); null hides the option. */
+  codeJobs?: CodeJobs | null;
 }
 
 export function CollabForm({
@@ -94,6 +97,7 @@ export function CollabForm({
   suggestDelayMs = 600,
   projectPath = null,
   noProjectHint = false,
+  codeJobs = null,
 }: Props) {
   const usable = roomAgents.filter((r) => r.agent && isAgentUsable(r.agent));
   const [goal, setGoal] = useState("");
@@ -163,6 +167,7 @@ export function CollabForm({
     workflowSel ?? (externals.length > 0 && usable.length >= 2 ? "review" : usable.length >= 3 ? "build" : "collab");
   const build = workflow === "build";
   const review = workflow === "review";
+  const code = workflow === "code";
   const withWorker = build || review;
   const usableIds = usable.map((r) => r.member.id);
   // Default builder or worker: a connected external agent for reviews, else an agent whose
@@ -207,7 +212,21 @@ export function CollabForm({
         ...(writeBrief ? {} : { brief: false }),
         ...(projectTitle && !agentFiles ? { agent_files: false } : {}),
       };
-      const run = await createRun(roomId, withWorker ? { ...body, workflow, builder_id: builderId } : body);
+      const run = await createRun(
+        roomId,
+        code
+          ? {
+              goal: body.goal,
+              workflow,
+              planner_id: plannerId,
+              critic_id: criticId,
+              budget_usd: RUN_BUDGET_DEFAULT,
+              max_turns: RUN_MAX_TURNS_DEFAULT,
+            }
+          : withWorker
+            ? { ...body, workflow, builder_id: builderId }
+            : body,
+      );
       setGoal("");
       setAttached([]);
       dismissed.current = new Set();
@@ -263,9 +282,30 @@ export function CollabForm({
             <option value="collab">Collaborate: Claude and GPT work it out together</option>
             <option value="review">Review &amp; improve: an agent&apos;s work, reviewed by two</option>
             <option value="build">Design &amp; build: two designers, one builder</option>
+            {codeJobs && (
+              <option value="code" disabled={!codeJobs.enabled}>
+                Code change: Claude and GPT write and review it, you merge
+                {codeJobs.enabled ? "" : " (needs a GitHub token)"}
+              </option>
+            )}
           </select>
+          {codeJobs && !codeJobs.enabled && (
+            <p className="mt-0.5 text-[10px] text-muted" data-testid="collab-code-off">
+              Code changes are off. {codeJobs.reason}
+            </p>
+          )}
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        {code && codeJobs && (
+          <p
+            className="rounded-md border border-line bg-panel-2 p-2 text-[11px] text-fg"
+            data-testid="collab-code-info"
+          >
+            Claude and GPT take turns: one writes the change in <strong>{codeJobs.repo}</strong>, the other reviews it,
+            and the automatic tests run. They fix at most twice, then you get one card: merge it or not. Budget: $
+            {codeJobs.budget_usd.toFixed(2)} per job. Nothing reaches main without your click.
+          </p>
+        )}
+        <div className={code ? "hidden" : "grid grid-cols-2 gap-2"}>
           <AgentSelect
             id={ids.planner}
             label={labels[0]}
@@ -320,7 +360,7 @@ export function CollabForm({
             {errors.builderId && <ErrorText>{errors.builderId}</ErrorText>}
           </>
         )}
-        {projectTitle && (
+        {projectTitle && !code && (
           <label className="flex items-start gap-2 text-[11px] text-muted" data-testid="collab-agent-files-box">
             <input
               type="checkbox"
@@ -345,7 +385,7 @@ export function CollabForm({
             Always included: {always.map((p) => p.split("/").pop()).join(", ")}
           </p>
         )}
-        {listFiles && (
+        {listFiles && !code && (
           <AttachmentsPicker
             listFiles={listFiles}
             selected={attached}
@@ -353,7 +393,7 @@ export function CollabForm({
             startPath={projectPath ?? ""}
           />
         )}
-        <label className="flex items-center gap-2 text-[11px] text-muted">
+        <label className={code ? "hidden" : "flex items-center gap-2 text-[11px] text-muted"}>
           <input
             type="checkbox"
             data-testid="collab-brief"
@@ -363,7 +403,7 @@ export function CollabForm({
           End with a decision brief (what was decided, what&apos;s waiting on you, next steps)
         </label>
         <div className="flex items-end gap-2">
-          <div className="w-28">
+          <div className={code ? "hidden" : "w-28"}>
             <label htmlFor={ids.budget} className={labelClass}>
               Budget (USD)
             </label>

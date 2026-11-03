@@ -196,9 +196,11 @@ class Run(Base):
     chain_depth: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # The owner asked to conclude now: skip to the brief.
     wrap_up: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Code jobs (kind 'code'): branch, pull request, commits, CI and review state.
+    code_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
-        CheckConstraint("kind in ('collab','reply','build','review')", name="run_kind"),
+        CheckConstraint("kind in ('collab','reply','build','review','code')", name="run_kind"),
         CheckConstraint(
             "status in ('queued','running','waiting','completed','failed','cancelled','budget_exceeded')",
             name="run_status",

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, isApiError } from "@/lib/api";
-import { isRunActive, type Agent, type Room, type RoomDetail } from "@/lib/types";
+import { isRunActive, type Agent, type CodeJobs, type Room, type RoomDetail } from "@/lib/types";
 import { useAgents } from "@/lib/useAgents";
 import { useDecisions } from "@/lib/useDecisions";
 import { senderStyle } from "@/lib/senderStyle";
@@ -62,6 +62,14 @@ export function RoomView(props: Props) {
   const { addRun } = runs;
   const archiveRun = useCallback(async (runId: string) => addRun(await api.archiveRun(runId)), [addRun]);
   const closeGoal = useCallback(() => setGoalOpen(false), []);
+  // Whether Claude and GPT can change the Command Center's code (checked when New goal opens).
+  const [codeJobs, setCodeJobs] = useState<CodeJobs | null>(null);
+  useEffect(() => {
+    if (!goalOpen) return;
+    const abort = new AbortController();
+    api.getCodeJobs(abort.signal).then(setCodeJobs, () => setCodeJobs(null));
+    return () => abort.abort();
+  }, [goalOpen]);
   // The browser tab shows how many decisions wait, e.g. "(2) Command Center".
   const waiting = decisions.decisions.filter((d) => d.status === "pending").length;
   useEffect(() => {
@@ -398,6 +406,7 @@ export function RoomView(props: Props) {
             projectTitle={projectTitle(workspace, roomDetail.project_path)}
             projectPath={roomDetail.project_path ?? null}
             noProjectHint={workspace.structured && !roomDetail.project_path}
+            codeJobs={codeJobs}
             suggestFiles={
               roomDetail.project_path ? (goal, signal) => api.suggestFiles(roomId, goal, signal) : undefined
             }

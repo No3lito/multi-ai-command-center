@@ -331,6 +331,23 @@ test("new project in two clicks: Claude and GPT join and start on the goal", asy
   await expect(page).toHaveTitle(/^\(1\) Multi-AI Command Center$/);
 });
 
+test("code change: the job explains itself, and fails plainly when GitHub cannot be reached", async ({ page }) => {
+  // The e2e server points code jobs at an address nothing listens on, so no real GitHub call is made.
+  test.setTimeout(60_000);
+  await signIn(page);
+  await openRoom(page, "General");
+  await openGoal(page);
+  await page.getByTestId("collab-workflow").selectOption("code");
+  await expect(page.getByTestId("collab-code-info")).toContainText("Nothing reaches main without your click");
+  await expect(page.getByTestId("collab-budget")).toBeHidden();
+  await page.getByTestId("collab-goal").fill("Add a footer with the version number");
+  await page.getByTestId("collab-start").click();
+  const job = page.getByTestId("run-item").filter({ hasText: "Add a footer with the version number" }).first();
+  await expect(job).toContainText(/(Claude|GPT) writes, (GPT|Claude) reviews/, { timeout: 10_000 });
+  await expect(job).toHaveAttribute("data-status", "failed", { timeout: 30_000 });
+  await expect(page.getByText(/GitHub refused a step of this code job: could not reach GitHub/).first()).toBeVisible();
+});
+
 test("phone width: no sideways scrolling, readable text", async ({ browser }) => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await page.goto("/");

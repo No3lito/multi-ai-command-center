@@ -160,7 +160,7 @@ export interface Agent extends AgentIn {
   price: AgentPrice | null;
 }
 
-export type RunKind = "collab" | "reply" | "build" | "review";
+export type RunKind = "collab" | "reply" | "build" | "review" | "code";
 export type RunStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "budget_exceeded";
 export type RunStep = string;
 
@@ -194,6 +194,8 @@ export interface Run {
   chain_depth?: number;
   /** The owner asked this run to conclude now. */
   wrap_up?: boolean;
+  /** Code jobs: the pull request, once opened. */
+  code_pr?: CodePr | null;
   turn_count: number;
   max_turns: number;
   budget_usd: number;
@@ -205,7 +207,22 @@ export interface Run {
   finished_at: string | null;
 }
 
-export type RunWorkflow = "collab" | "build" | "review";
+export type RunWorkflow = "collab" | "build" | "review" | "code";
+
+/** A code job's pull request on the Command Center's repository. */
+export interface CodePr {
+  number: number;
+  url: string;
+  title?: string;
+}
+
+/** Whether Claude and GPT can change the Command Center's code (a GitHub token is set). */
+export interface CodeJobs {
+  enabled: boolean;
+  repo: string;
+  budget_usd: number;
+  reason: string | null;
+}
 
 /** What the agents prepared to run when the owner answers a decision. */
 export interface FollowUpPlan {
@@ -243,6 +260,8 @@ export interface Decision {
   cannot_run_reason?: string | null;
   /** Raised in the last allowed round on this topic. */
   final_round?: boolean;
+  /** A finished code job: approving merges this pull request, declining closes it. */
+  code_pr?: CodePr | null;
 }
 
 export interface DecisionAnswerBody {
@@ -261,6 +280,8 @@ export interface DecisionAnswerResult {
   follow_up_run: Run | null;
   /** Approve or more info that started nothing, and why. */
   no_run_reason?: string | null;
+  /** A code job's pull request: merged or closed on GitHub. */
+  code_result?: string | null;
 }
 
 /** An external agent (for example Grok Bot) connected over MCP with a token. */

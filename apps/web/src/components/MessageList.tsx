@@ -236,7 +236,7 @@ function RunFold({
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">
             {run ? (FOLD_STATUS[run.status] ?? run.status) : "Earlier run"}
             {run &&
-              ` · ${run.kind === "collab" ? "collaborate" : run.kind === "build" ? "design & build" : "review & improve"}`}
+              ` · ${run.kind === "collab" ? "collaborate" : run.kind === "build" ? "design & build" : run.kind === "code" ? "code change" : "review & improve"}`}
             {run && ` · ${formatUsd(run.spent_usd)}`}
           </p>
           <p className="flex items-center gap-1.5 font-medium" title={title}>

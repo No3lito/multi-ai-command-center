@@ -1,6 +1,25 @@
 # Project status
 
-Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
+Updated Nov 3, 2026. This file is the single place to see what works, what was tested, and what is blocked.
+
+## Code jobs (in review, branch `agent/claude/code-jobs`, stacked on PR #12)
+
+Claude and GPT change the Command Center's code together; Noel decides with one click. Contract: [`docs/api/code-jobs.md`](api/code-jobs.md).
+
+- **Team, not one agent:** one writes, the other reviews, and they swap roles every job. The writer picks the files, writes edit blocks, and the edits are committed to an `agent/command-center/...` branch with a pull request. The repository's automatic tests run, the reviewer checks the diff and the results, and the writer fixes at most twice.
+- **One card at the end:** approve merges the pull request on GitHub, decline closes it, and "Send it back" starts another job on the same pull request with your note. The card links to the changes.
+- **Limits:** $3.00 per job (`CODE_JOB_BUDGET_USD`), enforced before every model call and counted in the $10 cap. Agents cannot change `.github/`, `.env` files, key files or anything outside the repository; an edit that cannot apply means nothing is committed.
+- **No git on the server:** everything goes through GitHub's REST API with a token limited to one repository. Without the token the option shows as off with the reason.
+- **Tests never reach GitHub:** test servers clear `GITHUB_TOKEN`, and the browser tests point code jobs at an unused local address.
+- **Independent review applied:** a separate agent reviewed the feature. Fixed: stricter path rules (`.github` in any case, `.git`, `CODEOWNERS`, odd characters), deletes only of files the writer saw, merges pinned to the reviewed commit and checked first, `[skip ci]` stripped and "no CI" never shown as tested, stopped jobs still end with a card, the writer's answer kept durably across restarts, gentler CI polling, and only the room's Claude and GPT can form the team.
+
+Evidence (FAKE ADAPTER and FAKE GITHUB; not yet run against real GitHub):
+
+- Backend: 180 passed, including the whole write, CI failure, review, fix, approve loop; send-back on the same pull request; blocked paths; no-CI commits; the 2-round stop; budget stops; a wrong token; and merge, close and a refused merge after an unreviewed push, through the server.
+- Dashboard: 149 passed.
+- Playwright: 9 passed, including the Code change option and a plain failure when GitHub cannot be reached.
+
+Needs from the owner: a fine-grained GitHub token limited to this repository (see the contract), placed in `.env` only.
 
 ## Dashboard redesign (in review, branch `agent/claude/dashboard-redesign`, stacked on PR #11)
 

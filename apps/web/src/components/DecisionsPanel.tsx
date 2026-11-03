@@ -38,6 +38,8 @@ export function bottomLine(brief: string): string {
 /** Plain words for what runs when the owner answers. */
 export function describePlan(plan: FollowUpPlan): string {
   if (plan.workflow === "none") return "Nothing more runs; your answer is recorded and shared with the agents.";
+  if (plan.workflow === "code")
+    return "a code job: one of Claude and GPT writes the change, the other reviews it, the automatic tests run, and you get a pull request to merge.";
   if ((plan.workflow === "review" || plan.workflow === "build") && plan.worker)
     return `${plan.worker} does the work, then Claude and GPT check it.`;
   return "Claude and GPT work it out and report back.";
@@ -125,6 +127,17 @@ function DecisionCard({
           <span className="font-semibold">Why it matters: </span>
           {decision.why}
         </p>
+      )}
+      {decision.code_pr && (
+        <a
+          href={decision.code_pr.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="decision-pr-link"
+          className="mt-1 inline-block font-medium text-accent underline"
+        >
+          See the changes in pull request #{decision.code_pr.number} on GitHub
+        </a>
       )}
       {decision.recommendation && (
         <p className="mt-1 text-fg" data-testid="decision-recommendation">
@@ -283,16 +296,32 @@ function startsRun(d: Decision, answer: DecisionAnswer): boolean {
 
 /** Plain words for what an answer will do, shown before it is sent. */
 export function whatHappens(d: Decision, answer: DecisionAnswer, budget: number | undefined): string {
+  if (d.code_pr) {
+    const n = `pull request #${d.code_pr.number}`;
+    if (answer === "approve")
+      return `Merges ${n} into main on GitHub. Rebuild the Command Center afterwards to use it.`;
+    if (answer === "decline") return `Closes ${n} on GitHub without merging. Nothing changes in your code.`;
+    if (answer === "more_info")
+      return `Sends ${n} back: the same writer applies your note, the tests run, and the reviewer checks it again (up to the code job budget).`;
+  }
   if (answer === "decline") return "Nothing runs. Your answer and note are recorded and shared with the agents.";
   if (answer === "dismiss") return "Nothing runs. The card is closed as no longer relevant.";
   if (answer === "approve" && d.cannot_run_reason) return `Nothing starts: ${d.cannot_run_reason}`;
   if (!startsRun(d, answer)) return "Nothing more runs. Your answer is recorded and shared with the agents.";
   const plan = answer === "approve" ? d.on_approve : d.on_more_info;
-  const money = budget !== undefined ? `$${budget.toFixed(2)}` : "the default (within the topic's $2 limit)";
+  const money =
+    plan.workflow === "code"
+      ? "the code job limit (a dollar cap in your note lowers it)"
+      : budget !== undefined
+        ? `$${budget.toFixed(2)}`
+        : "the default (within the topic's $2 limit)";
   return `${answer === "approve" ? "Starts" : "Starts, to get the missing facts:"} ${describePlan(plan)} Budget: ${money}.`;
 }
 
 export function confirmLabel(d: Decision, answer: DecisionAnswer, budget: number | undefined): string {
+  if (d.code_pr && answer === "approve") return `Merge #${d.code_pr.number}`;
+  if (d.code_pr && answer === "decline") return `Close #${d.code_pr.number}`;
+  if (d.code_pr && answer === "more_info") return "Send it back";
   if (!startsRun(d, answer)) return "Record answer";
   const verb = answer === "approve" ? "Approve and start" : "Ask and start";
   return budget !== undefined ? `${verb} · $${budget.toFixed(2)}` : verb;
