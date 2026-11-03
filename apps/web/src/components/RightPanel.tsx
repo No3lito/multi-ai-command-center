@@ -100,9 +100,15 @@ export function RightPanel({ open, detail, status, lastSeq, hasRoom, children, s
             if (!start || start.pointerId !== event.pointerId) return;
             resize(start.width + start.x - event.clientX);
           }}
-          onPointerUp={() => { drag.current = null; }}
-          onPointerCancel={() => { drag.current = null; }}
-          onLostPointerCapture={() => { drag.current = null; }}
+          onPointerUp={() => {
+            drag.current = null;
+          }}
+          onPointerCancel={() => {
+            drag.current = null;
+          }}
+          onLostPointerCapture={() => {
+            drag.current = null;
+          }}
           onKeyDown={(event) => {
             if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
             event.preventDefault();
@@ -113,43 +119,39 @@ export function RightPanel({ open, detail, status, lastSeq, hasRoom, children, s
         </div>
       )}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <div className="flex h-12 shrink-0 items-center border-b border-line px-3">
-        <h2 className="text-sm font-semibold">Room details</h2>
-      </div>
+        {children}
 
-      {children}
+        {showDetails && (
+          <>
+            <Section title="Members" count={detail?.members.length}>
+              {!hasRoom || !detail ? (
+                <p className="text-muted">{hasRoom ? "Loading..." : "No room selected."}</p>
+              ) : (
+                <ul className="space-y-1">
+                  {detail.members.map((m) => (
+                    <li key={m.id} className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate">{m.display_name}</span>
+                      <KindBadge kind={m.kind} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Section>
 
-      {showDetails && (
-        <>
-          <Section title="Members" count={detail?.members.length}>
-            {!hasRoom || !detail ? (
-              <p className="text-muted">{hasRoom ? "Loading..." : "No room selected."}</p>
-            ) : (
-              <ul className="space-y-1">
-                {detail.members.map((m) => (
-                  <li key={m.id} className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate">{m.display_name}</span>
-                    <KindBadge kind={m.kind} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
-
-          <Section title="Connection">
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-xs">
-              <dt className="text-muted">status</dt>
-              <dd>{hasRoom ? connectionLabel(status) : "n/a"}</dd>
-              <dt className="text-muted">last seq</dt>
-              <dd>{hasRoom ? lastSeq : "n/a"}</dd>
-              <dt className="text-muted">room</dt>
-              <dd className="truncate" title={detail?.id}>
-                {detail?.id ?? "n/a"}
-              </dd>
-            </dl>
-          </Section>
-        </>
-      )}
+            <Section title="Connection">
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-xs">
+                <dt className="text-muted">status</dt>
+                <dd>{hasRoom ? connectionLabel(status) : "n/a"}</dd>
+                <dt className="text-muted">last seq</dt>
+                <dd>{hasRoom ? lastSeq : "n/a"}</dd>
+                <dt className="text-muted">room</dt>
+                <dd className="truncate" title={detail?.id}>
+                  {detail?.id ?? "n/a"}
+                </dd>
+              </dl>
+            </Section>
+          </>
+        )}
       </div>
     </aside>
   );

@@ -400,6 +400,29 @@ export function DecisionsPanel({ runs, decisions = [], onAnswer }: Props) {
   const legacy = decisions.length === 0 ? (latest?.pending_decisions ?? []) : [];
   const waitingCount = pending.length || legacy.length;
 
+  // Look A1: when something waits on the owner, the card leads with no heading above it.
+  if (pending.length > 0) {
+    return (
+      <section data-testid="decisions-panel" className="border-b border-line px-4 py-4">
+        <div data-testid="decision-waiting">
+          <ul className="space-y-3">
+            {pending.map((d) => (
+              <DecisionCard key={d.id} decision={d} onAnswer={onAnswer} />
+            ))}
+          </ul>
+        </div>
+        {decided.length > 0 && (
+          <details className="mt-3" data-testid="decision-decided">
+            <summary className="cursor-pointer text-[11px] font-semibold text-muted">
+              Recently decided ({decided.length})
+            </summary>
+            <DecidedList decided={decided} />
+          </details>
+        )}
+      </section>
+    );
+  }
+
   return (
     <PanelSection title="Decisions" count={waitingCount || withBriefs.length} testId="decisions-panel">
       {latest && waitingCount === 0 && (
@@ -439,30 +462,36 @@ export function DecisionsPanel({ runs, decisions = [], onAnswer }: Props) {
           <summary className="cursor-pointer text-[11px] font-semibold text-muted">
             Recently decided ({decided.length})
           </summary>
-          <ul className="mt-1 space-y-1">
-            {decided.map((d) => (
-              <li key={d.id} data-testid="decision-decided-item" className="text-[11px]">
-                <span
-                  className={`mr-1 rounded px-1 py-0.5 text-[10px] font-medium ${
-                    d.status === "approved"
-                      ? "bg-accent-soft text-accent"
-                      : d.status === "declined"
-                        ? "text-danger"
-                        : "text-muted"
-                  }`}
-                >
-                  {STATUS_LABEL[d.status]}
-                </span>
-                <span className="text-fg">{d.question}</span>
-                {d.owner_note && <span className="block text-[10px] text-muted">Note: {d.owner_note}</span>}
-                {d.follow_up_run_id && (
-                  <span className="block text-[10px] text-muted">Follow-up run started; see the Runs tab.</span>
-                )}
-              </li>
-            ))}
-          </ul>
+          <DecidedList decided={decided} />
         </details>
       )}
     </PanelSection>
+  );
+}
+
+function DecidedList({ decided }: { decided: Decision[] }) {
+  return (
+    <ul className="mt-1 space-y-1">
+      {decided.map((d) => (
+        <li key={d.id} data-testid="decision-decided-item" className="text-[11px]">
+          <span
+            className={`mr-1 rounded px-1 py-0.5 text-[10px] font-medium ${
+              d.status === "approved"
+                ? "bg-accent-soft text-accent"
+                : d.status === "declined"
+                  ? "text-danger"
+                  : "text-muted"
+            }`}
+          >
+            {STATUS_LABEL[d.status]}
+          </span>
+          <span className="text-fg">{d.question}</span>
+          {d.owner_note && <span className="block text-[10px] text-muted">Note: {d.owner_note}</span>}
+          {d.follow_up_run_id && (
+            <span className="block text-[10px] text-muted">Follow-up run started; see the Runs tab.</span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

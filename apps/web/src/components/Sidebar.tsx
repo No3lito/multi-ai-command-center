@@ -31,7 +31,7 @@ export function Sidebar({ open, principal, rooms, selectedId, onSelect, onCreate
           open ? "translate-x-0" : "-translate-x-full invisible md:visible"
         }`}
       >
-        <div className="flex h-12 items-center gap-2 border-b border-line px-3">
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
           <Logo />
           <span className="truncate text-sm font-semibold">Multi-AI Command Center</span>
         </div>

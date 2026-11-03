@@ -30,7 +30,7 @@ export function ConnectionPill({ status }: { status: SocketStatus }) {
         aria-hidden="true"
         className={`h-1.5 w-1.5 rounded-full bg-current ${status === "live" ? "" : "animate-pulse"}`}
       />
-      {LABEL[status]}
+      <span className={status === "live" ? "sr-only" : ""}>{LABEL[status]}</span>
     </span>
   );
 }
