@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
+import uvicorn
 from fastapi import Depends, FastAPI, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -31,6 +32,7 @@ from command_center.db import models
 from command_center.db.session import Database
 from command_center.ids import new_id
 from command_center.logging_setup import configure_logging
+from command_center.mcp_gateway import build_gateway
 from command_center.messaging import service
 from command_center.messaging.hub import RoomHub
 from command_center.orchestrator.engine import BuiltinEngine
@@ -235,14 +237,18 @@ def create_app(config: Settings | None = None) -> FastAPI:
         )
 
         async def sweep_reservations() -> None:
+            ticks = 0
             while True:
-                await asyncio.sleep(300)
+                await asyncio.sleep(60)
+                ticks += 1
                 try:
-                    n = await model_port.settle_stale_reservations()
-                    if n:
-                        log.warning("settled %d stale budget reservations as fully spent", n)
+                    if ticks % 5 == 0:
+                        n = await model_port.settle_stale_reservations()
+                        if n:
+                            log.warning("settled %d stale budget reservations as fully spent", n)
+                    await engine.expire_waiting(settings.external_task_timeout_hours)
                 except Exception as exc:
-                    log.warning("reservation sweep failed (%s)", type(exc).__name__)
+                    log.warning("background sweep failed (%s)", type(exc).__name__)
 
         sweeper = asyncio.create_task(sweep_reservations(), name="reservation-sweep")
         app.state.worker = worker
@@ -250,9 +256,32 @@ def create_app(config: Settings | None = None) -> FastAPI:
         await hub.start()
         await worker.start()
         log.info("provider mode: %s", settings.provider_mode)
+        gateway: uvicorn.Server | None = None
+        gateway_task: asyncio.Task[None] | None = None
+        if settings.mcp_enabled:
+            gateway = uvicorn.Server(
+                uvicorn.Config(
+                    build_gateway(settings, db.sessionmaker, worker.wake),
+                    host=settings.mcp_host,
+                    port=settings.mcp_port,
+                    proxy_headers=False,
+                    log_level="warning",
+                    lifespan="on",
+                    ws="none",
+                    # Bounded connections, so the gateway cannot starve the dashboard and worker.
+                    limit_concurrency=64,
+                    timeout_keep_alive=5,
+                )
+            )
+            gateway_task = asyncio.create_task(gateway.serve(), name="mcp-gateway")
+            log.info("MCP gateway for external agents on %s:%d/mcp", settings.mcp_host, settings.mcp_port)
         try:
             yield
         finally:
+            if gateway is not None and gateway_task is not None:
+                gateway.should_exit = True
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(gateway_task, 10)
             sweeper.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await sweeper

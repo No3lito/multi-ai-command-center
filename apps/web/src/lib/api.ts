@@ -10,6 +10,7 @@ import type {
   RoomDetail,
   Run,
   Usage,
+  Connection,
 } from "./types";
 
 /** Error with the contract's `{"error": {"code", "message"}}` shape mapped onto it. */
@@ -135,14 +136,17 @@ export const api = {
       body: { password },
       skipUnauthorizedHandler: true,
     }),
-  logout: () => request<void>("/api/auth/logout", { method: "POST", skipUnauthorizedHandler: true }),
+  logout: () =>
+    request<void>("/api/auth/logout", {
+      method: "POST",
+      skipUnauthorizedHandler: true,
+    }),
   me: () => request<Principal>("/api/auth/me", { skipUnauthorizedHandler: true }),
   health: () => request<{ status: string; database: string }>("/api/health"),
 
   listRooms: () => request<Room[]>("/api/rooms"),
   createRoom: (name: string) => request<Room>("/api/rooms", { method: "POST", body: { name } }),
-  getRoom: (roomId: string, signal?: AbortSignal) =>
-    request<RoomDetail>(`/api/rooms/${enc(roomId)}`, { signal }),
+  getRoom: (roomId: string, signal?: AbortSignal) => request<RoomDetail>(`/api/rooms/${enc(roomId)}`, { signal }),
 
   listMessages: (roomId: string, afterSeq: number, limit = 200, signal?: AbortSignal) =>
     request<MessagePage>(`/api/rooms/${enc(roomId)}/messages?after_seq=${afterSeq}&limit=${limit}`, {
@@ -156,14 +160,20 @@ export const api = {
       mentions: [...mentions],
       idempotency_key: idempotencyKey,
     };
-    return request<Message>(`/api/rooms/${enc(roomId)}/messages`, { method: "POST", body });
+    return request<Message>(`/api/rooms/${enc(roomId)}/messages`, {
+      method: "POST",
+      body,
+    });
   },
 
   // Milestone B: agents
   listAgents: (signal?: AbortSignal) => request<Agent[]>("/api/agents", { signal }),
   createAgent: (agent: AgentIn) => request<Agent>("/api/agents", { method: "POST", body: agent }),
   updateAgent: (agentId: string, patch: Partial<AgentIn>) =>
-    request<Agent>(`/api/agents/${enc(agentId)}`, { method: "PATCH", body: patch }),
+    request<Agent>(`/api/agents/${enc(agentId)}`, {
+      method: "PATCH",
+      body: patch,
+    }),
   addRoomMember: (roomId: string, principalId: string) =>
     request<RoomDetail>(`/api/rooms/${enc(roomId)}/members`, {
       method: "POST",
@@ -177,6 +187,21 @@ export const api = {
     request<Run[]>(`/api/rooms/${enc(roomId)}/runs?limit=${limit}`, { signal }),
   getRun: (runId: string, signal?: AbortSignal) => request<Run>(`/api/runs/${enc(runId)}`, { signal }),
   cancelRun: (runId: string) => request<Run>(`/api/runs/${enc(runId)}/cancel`, { method: "POST" }),
+
+  listConnections: (signal?: AbortSignal) => request<Connection[]>("/api/connections", { signal }),
+  createConnection: (displayName: string, roomIds: string[] = []) =>
+    request<Connection>("/api/connections", {
+      method: "POST",
+      body: { display_name: displayName, room_ids: roomIds },
+    }),
+  rotateConnection: (id: string) =>
+    request<Connection>(`/api/connections/${enc(id)}/rotate`, {
+      method: "POST",
+    }),
+  revokeConnection: (id: string) =>
+    request<Connection>(`/api/connections/${enc(id)}/revoke`, {
+      method: "POST",
+    }),
 
   // Milestone B: usage and cost
   getUsage: (signal?: AbortSignal) => request<Usage>("/api/usage", { signal }),

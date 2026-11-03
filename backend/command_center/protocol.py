@@ -134,7 +134,7 @@ class MessageCreateIn(Strict):
 
 ProviderName = Literal["anthropic", "openai", "xai", "simulated"]
 AgentStatus = Literal["live", "simulated", "missing_key", "unknown_price", "disabled"]
-RunStatus = Literal["queued", "running", "completed", "failed", "cancelled", "budget_exceeded"]
+RunStatus = Literal["queued", "running", "waiting", "completed", "failed", "cancelled", "budget_exceeded"]
 MODEL_NAME = r"^[A-Za-z0-9._:-]{1,100}$"
 
 
@@ -149,7 +149,7 @@ class AgentIn(Strict):
     provider: ProviderName
     model: str = Field(pattern=MODEL_NAME)
     system_prompt: str = Field(default="", max_length=8000)
-    max_output_tokens: int = Field(default=2048, ge=16, le=8192)
+    max_output_tokens: int = Field(default=8000, ge=16, le=8192)
     enabled: bool = True
 
 
@@ -179,6 +179,32 @@ class AgentOut(Strict):
     price: PriceOut | None
 
 
+class ConnectionIn(Strict):
+    """An external agent (for example Grok Bot) that connects over MCP with a token."""
+
+    display_name: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$")
+    # Rooms it may work in (at least one). Everything in them is visible to the agent.
+    room_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+class ConnectionRoom(Strict):
+    id: str
+    name: str
+
+
+class ConnectionOut(Strict):
+    id: str
+    display_name: str
+    status: Literal["active", "disabled"]
+    created_at: datetime
+    last_used_at: datetime | None
+    rooms: list[ConnectionRoom]
+    # Only in the response that creates or rotates the token. Never stored in plain text.
+    token: str | None = None
+    mcp_path: str = "/mcp"
+    mcp_port: int
+
+
 class MemberIn(Strict):
     principal_id: str = Field(pattern=PRINCIPAL_ID)
 
@@ -187,7 +213,9 @@ class RunCreateIn(Strict):
     goal: str = Field(min_length=1, max_length=4000)
     # collab: planner plans, critic reviews, planner revises.
     # build: planner and critic co-design, builder builds exactly what they specify.
-    workflow: Literal["collab", "build"] = "collab"
+    # review: builder (the worker, often an external agent) shares its work, planner and
+    # critic review it and write a plan, the worker responds.
+    workflow: Literal["collab", "build", "review"] = "collab"
     planner_id: str = Field(pattern=PRINCIPAL_ID)
     critic_id: str = Field(pattern=PRINCIPAL_ID)
     builder_id: str | None = Field(default=None, pattern=PRINCIPAL_ID)
@@ -198,7 +226,7 @@ class RunCreateIn(Strict):
 class RunOut(Strict):
     id: str
     room_id: str
-    kind: Literal["collab", "reply", "build"]
+    kind: Literal["collab", "reply", "build", "review"]
     status: RunStatus
     goal: str
     step: str
@@ -207,6 +235,8 @@ class RunOut(Strict):
     builder_id: str | None = None
     agent_id: str | None
     root_run_id: str | None = None
+    # status "waiting": the external agent whose turn it is.
+    waiting_for: str | None = None
     turn_count: int
     max_turns: int
     budget_usd: float

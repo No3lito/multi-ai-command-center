@@ -82,9 +82,7 @@ export interface PostMessageBody {
 }
 
 export type ServerFrame =
-  | { type: "message"; message: Message }
-  | { type: "ready"; last_seq: number }
-  | { type: "ping"; ts: string };
+  { type: "message"; message: Message } | { type: "ready"; last_seq: number } | { type: "ping"; ts: string };
 
 export const ROOM_NAME_MAX = 80;
 export const MESSAGE_TEXT_MAX = 32000;
@@ -96,8 +94,7 @@ export const MESSAGE_TEXT_MAX = 32000;
 export type AgentProvider = "anthropic" | "openai" | "xai" | "simulated";
 
 /** Whether an agent can run right now. */
-export type AgentStatus =
-  "live" | "simulated" | "missing_key" | "unknown_price" | "disabled";
+export type AgentStatus = "live" | "simulated" | "missing_key" | "unknown_price" | "disabled";
 
 export interface AgentIn {
   display_name: string;
@@ -121,16 +118,9 @@ export interface Agent extends AgentIn {
   price: AgentPrice | null;
 }
 
-export type RunKind = "collab" | "reply" | "build";
-export type RunStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "budget_exceeded";
-export type RunStep =
-  "plan" | "critique" | "revise" | "summary" | "reply" | "done";
+export type RunKind = "collab" | "reply" | "build" | "review";
+export type RunStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "budget_exceeded";
+export type RunStep = string;
 
 export interface Run {
   id: string;
@@ -144,6 +134,8 @@ export interface Run {
   builder_id?: string | null;
   agent_id: string | null;
   root_run_id?: string | null;
+  /** Set while status is "waiting": the external agent whose turn it is. */
+  waiting_for?: string | null;
   turn_count: number;
   max_turns: number;
   budget_usd: number;
@@ -155,7 +147,21 @@ export interface Run {
   finished_at: string | null;
 }
 
-export type RunWorkflow = "collab" | "build";
+export type RunWorkflow = "collab" | "build" | "review";
+
+/** An external agent (for example Grok Bot) connected over MCP with a token. */
+export interface Connection {
+  id: string;
+  display_name: string;
+  status: "active" | "disabled";
+  created_at: string;
+  last_used_at: string | null;
+  rooms: { id: string; name: string }[];
+  /** Only present right after creating or rotating; shown once, never stored by the server. */
+  token: string | null;
+  mcp_path: string;
+  mcp_port: number;
+}
 
 export interface CreateRunBody {
   goal: string;
@@ -192,9 +198,8 @@ export const RUN_BUDGET_DEFAULT = 0.5;
 export const RUN_BUDGET_MAX = 5;
 export const RUN_MAX_TURNS_DEFAULT = 8;
 
-export const ACTIVE_RUN_STATUSES: readonly RunStatus[] = ["queued", "running"];
-export const isRunActive = (run: Pick<Run, "status">): boolean =>
-  ACTIVE_RUN_STATUSES.includes(run.status);
+export const ACTIVE_RUN_STATUSES: readonly RunStatus[] = ["queued", "running", "waiting"];
+export const isRunActive = (run: Pick<Run, "status">): boolean => ACTIVE_RUN_STATUSES.includes(run.status);
 
 /** Agents that can take a turn right now. */
 export const isAgentUsable = (agent: Pick<Agent, "status">): boolean =>

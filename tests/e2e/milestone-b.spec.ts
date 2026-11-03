@@ -160,3 +160,41 @@ test("simulated design & build: Claude and GPT design, Grok builds and applies f
   await expect(notes.and(page.locator('[data-note-kind="task.result"]'))).toHaveCount(1);
   await expect(notes.first()).toContainText("Step 1 of 7: @Claude, draft the design for: A tip calculator web page");
 });
+
+test("connect Grok Bot from the dashboard; a review run waits for it", async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  await openRoom(page, "General");
+
+  const panel = page.getByTestId("connections-panel");
+  await panel.getByTestId("connection-name").fill("Grok Bot E2E");
+  await panel.getByTestId("connection-create").click();
+  const token = panel.getByTestId("connection-token");
+  await expect(token).toContainText("ccx_");
+  await expect(token).toContainText("shown only once");
+  await panel.getByText("I saved it").click();
+  await expect(token).toHaveCount(0);
+  await expect(panel.getByTestId("connection-item").filter({ hasText: "Grok Bot E2E" })).toHaveAttribute(
+    "data-status",
+    "active",
+  );
+
+  // With a connection in the room, the form offers review & improve with it as the worker.
+  await page.getByTestId("collab-workflow").selectOption("review");
+  await page.getByTestId("collab-builder").selectOption({ label: "Grok Bot E2E (connected)" });
+  await page.getByTestId("collab-goal").fill("Review the strategy work");
+  await page.getByTestId("collab-start").click();
+  const runItem = page.getByTestId("run-item").filter({ hasText: "Review the strategy work" }).first();
+  await expect(runItem).toHaveAttribute("data-status", "waiting", { timeout: 20_000 });
+  await expect(runItem.getByTestId("run-status")).toHaveText("Waiting for Grok Bot E2E");
+  await expect(runItem).toContainText("Grok Bot E2E's work, reviewed by Claude and GPT");
+
+  await runItem.getByTestId("run-cancel").click();
+  await expect(runItem).toHaveAttribute("data-status", "cancelled", { timeout: 10_000 });
+
+  const item = panel.getByTestId("connection-item").filter({ hasText: "Grok Bot E2E" });
+  await item.getByText("Disconnect").click();
+  await item.getByTestId("connection-revoke-confirm").click();
+  await expect(item).toHaveAttribute("data-status", "disabled");
+});
+

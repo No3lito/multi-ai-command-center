@@ -174,13 +174,19 @@ class Run(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # status 'waiting': the current step belongs to an external agent (for example Grok Bot,
+    # connected over MCP). The run resumes when that agent submits its part.
+    waiting_for: Mapped[str | None] = mapped_column(ForeignKey("principals.id"), nullable=True)
+    waiting_instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    waiting_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        CheckConstraint("kind in ('collab','reply','build')", name="run_kind"),
+        CheckConstraint("kind in ('collab','reply','build','review')", name="run_kind"),
         CheckConstraint(
-            "status in ('queued','running','completed','failed','cancelled','budget_exceeded')",
+            "status in ('queued','running','waiting','completed','failed','cancelled','budget_exceeded')",
             name="run_status",
         ),
+        Index("runs_waiting", "waiting_for", postgresql_where="status = 'waiting'"),
         Index("runs_active", "status", "created_at", postgresql_where="status in ('queued','running')"),
         Index("runs_by_room", "room_id", "created_at"),
         Index("runs_by_root", "root_run_id"),
@@ -242,3 +248,22 @@ class UsageEntry(Base):
     reservation_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     message_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentToken(Base):
+    """Access token for an external agent (kind 'external', for example Grok Bot over MCP).
+
+    Only the SHA-256 hash is stored; the token is shown to the owner once. Revoking is
+    immediate. An external agent can act only in rooms it is a member of.
+    """
+
+    __tablename__ = "agent_tokens"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(ForeignKey("principals.id", ondelete="CASCADE"))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("agent_tokens_by_principal", "principal_id"),)

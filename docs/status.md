@@ -2,6 +2,28 @@
 
 Updated Nov 2, 2026. This file is the single place to see what works, what was tested, and what is blocked.
 
+## Grok Bot bridge (in review, branch `agent/claude/grok-bot-bridge`)
+
+The owner's Grok Bot (xAI's hosted agent app, with its own sub-agents and work) joins the Command Center over MCP. Its first job is a **Review & improve** run: Grok Bot shares its work, Claude and GPT review it and write a plan of fixes and new ideas, and Grok Bot responds. Contract and setup: [`docs/api/bridge.md`](api/bridge.md).
+
+Evidence so far:
+
+- `backend/tests/test_bridge.py`: an official MCP SDK client against the real server. It covers tokens, room scoping, rate limits, rotation and revocation, and a full review run with fake Claude and GPT providers. It also checks cancelling and timeouts.
+- Dashboard tests and a browser test: connect Grok Bot, then a review that waits for it.
+
+**Verified by the owner (Nov 2, 2026):**
+
+- A named Cloudflare Tunnel (`command-center`, running as a Windows service on the Docker computer) routes `grokbot.multiaicommandcenter.com` to the gateway on port 8001 only.
+- From the internet, `/mcp` answers "only POST is supported" and `/` answers "not found". The dashboard is not reachable.
+- The owner's real Grok Bot added the server and called `whoami`, which returned the name Grok Bot and the room Meme Coin Strategy.
+
+**First real review completed (Nov 2, 2026, 8:07 PM ET):** Grok Bot shared its 112-hypothesis meme-coin research log over MCP. Claude Sonnet 5.5 reviewed it, GPT-6.1 Sol challenged the review (and corrected two of Claude's errors), and Claude wrote an 8-step plan. Grok Bot responded, saved `HYPOTHESIS-REVIEW.md` and a dated `CLAUDE-FEEDBACK.md` note on the owner's computer, and held every paid-data step for the owner's approval. Real API cost: $0.1452.
+
+Found and fixed during the first attempts:
+
+- Claude 5.5's thinking used up the 2,048-token output limit. Claude now runs at medium effort, with 12,000 tokens for review and design steps.
+- Run summaries repeated very long goals. They now show the goal's first line.
+
 ## Grok agent and design & build workflow (in review, PR #5)
 
 Branch: `agent/claude/grok-agent`.

@@ -488,5 +488,28 @@ async def test_cut_off_answers_are_labeled(world: dict[str, Any]) -> None:
         body = await s.scalar(select(models.Message.body_text).where(models.Message.correlation_id == run.id))
         prof = await s.get(models.AgentProfile, world["agents"]["Claude"].id)
     assert body is not None and body.startswith("half a plan")
-    assert "[Cut off: this answer reached Claude's output limit of 2048 tokens.]" in body
-    assert prof is not None and prof.max_output_tokens == 2048
+    assert "[Cut off: this answer reached Claude's output limit of 8000 tokens.]" in body
+    assert prof is not None and prof.max_output_tokens == 8000
+
+
+async def test_empty_answer_fails_the_step_with_a_clear_reason(world: dict[str, Any]) -> None:
+    """Claude 5.5 can spend its whole output limit thinking; the step must say so, not post ''."""
+
+    class ThoughtOnly(Adapter):
+        async def generate(self, req: ChatRequest) -> ChatResponse:
+            self.calls += 1
+            return ChatResponse(text="", input_tokens=10, output_tokens=8000, model=req.model, truncated=True)
+
+    sm = world["sm"]
+    port = await port_for(sm, cfg(world["url"]), ThoughtOnly())
+    engine = BuiltinEngine(sm, port, world["coordinator"], Decimal("0.25"), simulated=False)
+    run = await add_run(world)
+    await engine.step(run.id)
+    async with sm() as s:
+        r = await s.get(models.Run, run.id)
+        texts = (
+            await s.scalars(select(models.Message.body_text).where(models.Message.correlation_id == run.id))
+        ).all()
+    assert r is not None and r.status == "failed"
+    assert "used its whole output limit (8000 tokens) on thinking" in (r.error or "")
+    assert not any(t == "(empty response)" for t in texts)

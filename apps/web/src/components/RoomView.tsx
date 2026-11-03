@@ -9,6 +9,7 @@ import { useRoomStream } from "@/lib/useRoomStream";
 import { useRuns } from "@/lib/useRuns";
 import { useUsage } from "@/lib/useUsage";
 import { AgentsPanel, type RoomAgent } from "./AgentsPanel";
+import { ConnectionsPanel } from "./ConnectionsPanel";
 import { CollabForm } from "./CollabForm";
 import { Composer, type MentionAgent } from "./Composer";
 import { ConnectionPill } from "./ConnectionPill";
@@ -50,6 +51,18 @@ export function RoomView(props: Props) {
     () => splitAgents(roomDetail, agentsHook.agents),
     [roomDetail, agentsHook.agents],
   );
+  const externals = useMemo(
+    () => (roomDetail ? roomDetail.members.filter((m) => m.kind === "external") : []),
+    [roomDetail],
+  );
+  const memberIds = useMemo(() => new Set(roomDetail?.members.map((m) => m.id) ?? []), [roomDetail]);
+  const reloadDetail = useCallback(() => {
+    if (!roomId) return;
+    api
+      .getRoom(roomId)
+      .then((d) => setDetail({ kind: "ready", detail: d }))
+      .catch(() => {});
+  }, [roomId]);
 
   const mentionAgents = useMemo<MentionAgent[]>(
     () =>
@@ -93,7 +106,11 @@ export function RoomView(props: Props) {
         if (isApiError(e) && e.status === 404) {
           setDetail({ kind: "not_found" });
           onRoomMissing();
-        } else setDetail({ kind: "error", message: isApiError(e) ? e.message : "Could not load the room." });
+        } else
+          setDetail({
+            kind: "error",
+            message: isApiError(e) ? e.message : "Could not load the room.",
+          });
       });
     return () => abort.abort();
   }, [roomId, detailReload, onRoomMissing]);
@@ -165,7 +182,10 @@ export function RoomView(props: Props) {
       <EmptyState
         title="Could not load this room"
         text={detail.message}
-        action={{ label: "Try again", onClick: () => setDetailReload((n) => n + 1) }}
+        action={{
+          label: "Try again",
+          onClick: () => setDetailReload((n) => n + 1),
+        }}
       />
     );
   } else if (stream.phase === "error") {
@@ -191,12 +211,7 @@ export function RoomView(props: Props) {
           onRetry={outbox.retry}
           onDiscard={outbox.discard}
         />
-        <Composer
-          onSend={outbox.send}
-          disabled={detail.kind !== "ready"}
-          roomName={roomName}
-          agents={mentionAgents}
-        />
+        <Composer onSend={outbox.send} disabled={detail.kind !== "ready"} roomName={roomName} agents={mentionAgents} />
       </>
     );
   }
@@ -224,7 +239,13 @@ export function RoomView(props: Props) {
           onRetry={agentsHook.reload}
         />
         {roomDetail && !notFound && (
-          <CollabForm roomId={roomId} roomAgents={roomAgents} createRun={api.createRun} onStarted={runs.addRun} />
+          <CollabForm
+            roomId={roomId}
+            roomAgents={roomAgents}
+            externals={externals}
+            createRun={api.createRun}
+            onStarted={runs.addRun}
+          />
         )}
         <RunsPanel
           hasRoom={!!roomDetail && !notFound}
@@ -236,6 +257,14 @@ export function RoomView(props: Props) {
           onRetry={runs.reload}
         />
         <UsagePanel usage={usage.usage} error={usage.error} />
+        <ConnectionsPanel
+          api={api}
+          roomId={roomDetail && !notFound ? roomId : null}
+          roomName={roomDetail?.name ?? null}
+          memberIds={memberIds}
+          onAddToRoom={addAgent}
+          onChanged={reloadDetail}
+        />
       </RightPanel>
     </>
   );
