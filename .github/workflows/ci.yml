@@ -34,10 +34,14 @@ jobs:
       # The Docker image installs without dev tools: the app must import with only its own dependencies.
       - run: UV_PROJECT_ENVIRONMENT=/tmp/prod uv sync --frozen --no-dev && /tmp/prod/bin/python -c "import command_center.app"
       - run: uv sync --frozen
+      # Every check runs even when an earlier one fails, so one push reports every problem.
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+        if: ${{ !cancelled() }}
       - run: uv run mypy command_center
+        if: ${{ !cancelled() }}
       - run: uv run pytest -q
+        if: ${{ !cancelled() }}
 
   web:
     runs-on: ubuntu-latest
@@ -52,17 +56,25 @@ jobs:
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
+      # Every check runs even when an earlier one fails, so one push reports every problem.
       - run: npm run lint
       - run: npm run typecheck
+        if: ${{ !cancelled() }}
       - run: npm test
-      - run: npm run build
+        if: ${{ !cancelled() }}
+      - id: build
+        run: npm run build
+        if: ${{ !cancelled() }}
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:
           name: web-out
           path: apps/web/out
 
   e2e:
     needs: [backend, web]
+    # Browser tests run whenever the dashboard built, even if a lint or unit check failed.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     services:
       postgres:

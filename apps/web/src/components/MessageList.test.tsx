@@ -22,7 +22,13 @@ describe("MessageList", () => {
     const second = { ...msg(2), sender: { ...first.sender } };
     const third = { ...msg(3), sender: { ...first.sender, principal_id: "different-principal" } };
     render(
-      <MessageList messages={[first, second, third]} pending={[]} loading={false} onRetry={() => {}} onDiscard={() => {}} />,
+      <MessageList
+        messages={[first, second, third]}
+        pending={[]}
+        loading={false}
+        onRetry={() => {}}
+        onDiscard={() => {}}
+      />,
     );
     const rows = screen.getAllByTestId("message-item");
     expect(rows[0]).not.toHaveAttribute("data-grouped");
@@ -76,7 +82,9 @@ describe("MessageList", () => {
       { principal_id: "claude-1", kind: "agent" as const, display_name: "Claude" },
       { principal_id: "claude-2", kind: "agent" as const, display_name: "Claude" },
       ...Array.from({ length: 3 }, (_, index) => ({
-        principal_id: `other-${index}`, kind: "agent" as const, display_name: `Other ${index}`,
+        principal_id: `other-${index}`,
+        kind: "agent" as const,
+        display_name: `Other ${index}`,
       })),
     ];
     render(
@@ -182,15 +190,22 @@ describe("MessageList", () => {
 
   it("uses the shared owner's allocated rose accent for pending delivery", () => {
     const owner = { id: "noel", kind: "owner", display_name: "Noel" };
-    const styles = new Map([
-      ["owner:noel", { ...senderStyle(owner), color: "var(--speaker-rose)" }],
-    ]);
+    const styles = new Map([["owner:noel", { ...senderStyle(owner), color: "var(--speaker-rose)" }]]);
     render(
       <MessageList
         messages={[]}
         participants={[owner]}
         speakerStyles={styles}
-        pending={[{ key: "pending-1", text: "Retry me", status: "failed", error: "Offline" }]}
+        pending={[
+          {
+            key: "pending-1",
+            text: "Retry me",
+            mentions: [],
+            status: "failed",
+            error: "Offline",
+            createdAt: "2026-11-03T12:00:00Z",
+          },
+        ]}
         loading={false}
         onRetry={() => {}}
         onDiscard={() => {}}

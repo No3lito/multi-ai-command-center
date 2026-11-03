@@ -49,7 +49,8 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
 
   // The right panel opens on Decide; agents, usage and connections live under Setup.
   await expect(page.getByTestId("tab-decide")).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByTestId("summary-panel")).toBeVisible();
+  // The "Tasks and progress" summary appears once the room has a run or a decision.
+  await expect(page.getByTestId("summary-panel")).toHaveCount(0);
   await tab(page, "setup");
 
   // Seeded agents are room members and clearly marked as simulated.

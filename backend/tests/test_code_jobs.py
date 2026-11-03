@@ -445,7 +445,7 @@ async def test_owner_approves_to_merge_and_declines_to_close(fresh_database_url:
                 room_id = next(r["id"] for r in rooms if r["name"] == "General")
                 me = (await c.get("/api/auth/me")).json()
                 agents = {a["display_name"]: a for a in (await c.get("/api/agents")).json()}
-                heads = {n: await open_fake_pr(gh_base, n) for n in (1, 2, 3)}
+                heads = {n: await open_fake_pr(gh_base, n) for n in (1, 2, 3, 4)}
                 ids = {
                     n: await card_for_pr(
                         fresh_database_url,
@@ -456,10 +456,10 @@ async def test_owner_approves_to_merge_and_declines_to_close(fresh_database_url:
                         agents["GPT"]["id"],
                         heads[n],
                     )
-                    for n in (1, 2, 3)
+                    for n in (1, 2, 3, 4)
                 }
                 cards = (await c.get(f"/api/rooms/{room_id}/decisions")).json()
-                assert {d["code_pr"]["number"] for d in cards if d["code_pr"]} == {1, 2, 3}
+                assert {d["code_pr"]["number"] for d in cards if d["code_pr"]} == {1, 2, 3, 4}
                 r = await c.post(f"/api/decisions/{ids[1]}/answer", json={"answer": "approve"})
                 assert r.status_code == 200, r.text
                 assert "Merged pull request #1" in r.json()["code_result"]
@@ -470,14 +470,21 @@ async def test_owner_approves_to_merge_and_declines_to_close(fresh_database_url:
                 r = await c.post(f"/api/decisions/{ids[3]}/answer", json={"answer": "approve"})
                 assert r.status_code == 409 and r.json()["error"]["code"] == "merge_refused", r.text
                 assert "changed after the review" in r.json()["error"]["message"]
+                # Never merge on red, or while the tests are still running.
+                for result, words in (("failure", "tests failed"), ("pending", "still running")):
+                    async with httpx.AsyncClient() as raw:
+                        await raw.post(f"{gh_base}/_config", json={"ci_for": {heads[4]: result}})
+                    r = await c.post(f"/api/decisions/{ids[4]}/answer", json={"answer": "approve"})
+                    assert r.status_code == 409 and r.json()["error"]["code"] == "tests_not_passed", r.text
+                    assert words in r.json()["error"]["message"]
                 pending = (
                     await c.get(f"/api/rooms/{room_id}/decisions", params={"status": "pending"})
                 ).json()
-                assert [d["id"] for d in pending] == [ids[3]]
+                assert {d["id"] for d in pending} == {ids[3], ids[4]}
                 async with httpx.AsyncClient() as raw:
                     state = (await raw.get(f"{gh_base}/_state")).json()
                 assert state["prs"]["1"]["merged"] is True and state["prs"]["2"]["state"] == "closed"
-                assert state["prs"]["3"]["merged"] is False
+                assert state["prs"]["3"]["merged"] is False and state["prs"]["4"]["merged"] is False
                 assert state["main_files"]["app/calc.py"] == "# change 1\n"
                 # A new code job from the dashboard gets the job budget and starts by picking files.
                 run = await c.post(

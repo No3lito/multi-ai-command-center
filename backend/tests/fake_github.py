@@ -32,6 +32,7 @@ class FakeRepo:
         # CI conclusion for each new commit, in order (the last one repeats). "none": no CI.
         self.ci = ci or ["success"]
         self.ci_by_sha: dict[str, str] = {}
+        self.ci_overrides: dict[str, str] = {}  # sha -> result, set through /_config
         root = self._commit(files or {}, [], "initial")
         self.branches["main"] = root
 
@@ -45,6 +46,8 @@ class FakeRepo:
         return self.branches.get(ref) or (ref if ref in self.commits else None)
 
     def ci_for(self, sha: str) -> str:
+        if sha in self.ci_overrides:
+            return self.ci_overrides[sha]
         if sha not in self.ci_by_sha:
             index = min(len(self.ci_by_sha), len(self.ci) - 1)
             self.ci_by_sha[sha] = self.ci[index]
@@ -191,6 +194,10 @@ def make_app(repo: FakeRepo) -> Starlette:
         result = repo.ci_for(sha)
         if result == "none":
             return JSONResponse({"workflow_runs": []})
+        if result == "pending":
+            return JSONResponse(
+                {"workflow_runs": [{"id": int(sha[1:]), "status": "in_progress", "conclusion": None}]}
+            )
         return JSONResponse(
             {"workflow_runs": [{"id": int(sha[1:]), "status": "completed", "conclusion": result}]}
         )
@@ -232,6 +239,7 @@ def make_app(repo: FakeRepo) -> Starlette:
     async def configure(request: Request) -> Response:
         body = await request.json()
         repo.ci = body.get("ci", repo.ci)
+        repo.ci_overrides.update(body.get("ci_for", {}))
         return JSONResponse({})
 
     r = f"/repos/{REPO}"
