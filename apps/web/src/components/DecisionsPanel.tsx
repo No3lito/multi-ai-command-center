@@ -116,7 +116,7 @@ function DecisionCard({
           <textarea
             data-testid="decision-note"
             className="w-full rounded border border-line bg-bg p-1 text-xs"
-            rows={2}
+            rows={4}
             maxLength={2000}
             placeholder="Optional note or limit, e.g. cap at 50k Helius credits"
             aria-label="Note for the agents"
