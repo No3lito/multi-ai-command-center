@@ -27,8 +27,12 @@ export function bottomLine(brief: string): string {
       if (rest) return rest;
     }
   }
-  const first = brief.split("\n").find((l) => l.trim() && !/^[#*_\s]*bottom line/i.test(l.trim()));
-  return (first ?? "").replace(/^[-*•\s]+/, "").trim();
+  // No "Bottom line" heading: the first plain line, skipping the verdict line and markdown symbols.
+  const first = brief.split("\n").find((l) => l.trim() && !/^[#*_\s]*(bottom line|verdict)/i.test(l.trim()));
+  return (first ?? "")
+    .replace(/^[-*•#\s]+/, "")
+    .replace(/\*\*|__/g, "")
+    .trim();
 }
 
 /** Plain words for what runs when the owner answers. */

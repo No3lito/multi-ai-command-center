@@ -34,6 +34,8 @@ const BRIEF = `**Bottom line:** No edge at a 5-second delay; three clean retests
 1. Grok Bot runs the check after approval.`;
 
 describe("bottomLine", () => {
+  it("skips the verdict line and markdown symbols when there is no Bottom line heading", () =>
+    expect(bottomLine("**Verdict:** Needs you.\n**Ship** the **fix** today.")).toBe("Ship the fix today."));
   it("takes the text after the Bottom line heading", () =>
     expect(bottomLine(BRIEF)).toBe("No edge at a 5-second delay; three clean retests are justified."));
   it("handles a heading on its own line", () =>

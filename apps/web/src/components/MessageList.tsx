@@ -7,6 +7,7 @@ import { isRunActive, type Message, type PrincipalKind, type Run } from "@/lib/t
 import type { PendingMessage } from "@/lib/useOutbox";
 import { senderStyle, tint } from "@/lib/senderStyle";
 import { Avatar } from "./Avatar";
+import { bottomLine } from "./DecisionsPanel";
 import { Folded, Markdown } from "./Markdown";
 import { VerdictPill } from "./VerdictPill";
 
@@ -186,21 +187,9 @@ const FOLD_STATUS: Record<string, string> = {
   budget_exceeded: "Over budget",
 };
 
-/** First line of a brief's "Bottom line" (kept here so the chat does not import panel code). */
+/** The summary line shown on a folded run card (same rule as the decisions panel). */
 function briefLine(brief: string | null | undefined): string {
-  if (!brief) return "";
-  for (const raw of brief.split("\n")) {
-    const bare = raw.trim().replace(/^[#*_\s]+/, "");
-    if (/^bottom line/i.test(bare)) {
-      const rest = bare.replace(/^bottom line[*_\s]*:?[*_\s]*/i, "").trim();
-      if (rest) return rest;
-    }
-  }
-  const first = brief.split("\n").find((l) => l.trim() && !/^[#*_\s]*bottom line/i.test(l.trim()));
-  return (first ?? "")
-    .replace(/^[-*•#\s]+/, "")
-    .trim()
-    .slice(0, 300);
+  return brief ? bottomLine(brief).slice(0, 300) : "";
 }
 
 /** One finished run, folded into a single card; its full conversation opens on demand. */
