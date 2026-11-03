@@ -157,7 +157,11 @@ async def test_run_validation_and_membership(sim_server: Server) -> None:
             json={"goal": "x", "planner_id": agents["Claude"]["id"], "critic_id": agents["Claude"]["id"]},
         )
         assert same.status_code == 422
-        room = (await c.post("/api/rooms", json={"name": f"Empty {uuid.uuid4().hex[:6]}"})).json()
+        room = (
+            await c.post(
+                "/api/rooms", json={"name": f"Empty {uuid.uuid4().hex[:6]}", "add_default_agents": False}
+            )
+        ).json()
         missing = await c.post(
             f"/api/rooms/{room['id']}/runs",
             json={"goal": "x", "planner_id": agents["Claude"]["id"], "critic_id": agents["GPT"]["id"]},

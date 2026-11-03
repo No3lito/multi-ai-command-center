@@ -118,6 +118,8 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
   await expect(card.getByTestId("decision-note")).toHaveValue("Simulated test: record my answer only.");
   await card.getByTestId("decision-note").fill("Looks good");
   await card.getByTestId("decision-follow").click();
+  await expect(card.getByTestId("decision-what-happens")).toContainText("Nothing more runs");
+  await card.getByTestId("decision-confirm").click();
   await expect(decisions.getByTestId("decision-card")).toHaveCount(0);
   const decided = decisions.getByTestId("decision-decided-item");
   await expect(decided).toContainText("Approved");
@@ -281,6 +283,7 @@ test("connect Grok Bot from the dashboard; a review run waits for it", async ({ 
 test("projects: a new room gets its own project folder, and inbox files are filed with one click", async ({ page }) => {
   await signIn(page);
   const roomName = `Polymarket bot ${Date.now()}`;
+  await page.getByTestId("new-project-open").click();
   await page.getByTestId("new-room-name").fill(roomName);
   await expect(page.getByTestId("new-room-project")).toHaveValue("__new__");
   await expect(page.getByTestId("new-room-family")).toHaveValue("trading");
@@ -301,4 +304,44 @@ test("projects: a new room gets its own project folder, and inbox files are file
   await expect(item.getByTestId("inbox-project")).toHaveValue("01-PROJECTS/trading/demo-strategy");
   await item.getByTestId("inbox-file").click();
   await expect(page.getByTestId("inbox-panel")).toHaveCount(0);
+});
+
+test("new project in two clicks: Claude and GPT join and start on the goal", async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const name = `Draft helper ${Date.now()}`;
+  await page.getByTestId("new-project-open").click(); // click 1
+  await page.getByTestId("new-room-name").fill(name);
+  await page.getByTestId("new-room-goal").fill("Plan a tiny demo");
+  await page.getByTestId("new-room-start").click(); // click 2
+  await expect(page.getByTestId("modal")).toHaveCount(0, { timeout: 15_000 });
+  await openRoom(page, name);
+  // Every agent that can answer joins (in simulated mode that includes Grok).
+  const members = page.getByTestId("room-members");
+  await expect(members.locator('[data-sender="claude"]')).toHaveCount(1);
+  await expect(members.locator('[data-sender="gpt"]')).toHaveCount(1);
+  // The run starts by itself; when it finishes, Claude's and GPT's messages carry their colors.
+  await tab(page, "runs");
+  const run = page.getByTestId("run-item").filter({ hasText: "Plan a tiny demo" }).first();
+  await expect(run).toHaveAttribute("data-status", "completed", { timeout: 45_000 });
+  const fold = page.getByTestId("run-fold").first();
+  if ((await fold.getAttribute("data-open")) !== "true") await fold.getByTestId("run-fold-toggle").click();
+  await expect(page.locator('[data-testid="message-item"][data-sender-style="claude"]').first()).toBeVisible();
+  await expect(page.locator('[data-testid="message-item"][data-sender-style="gpt"]').first()).toBeVisible();
+  await expect(page).toHaveTitle(/^\(1\) Multi-AI Command Center$/);
+});
+
+test("phone width: no sideways scrolling, readable text", async ({ browser }) => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await page.goto("/");
+  await page.getByTestId("login-password").fill(PASSWORD);
+  await page.getByTestId("login-submit").click();
+  await page.getByLabel("Show rooms").click();
+  await page.getByTestId("room-item").filter({ hasText: "General" }).first().click();
+  await expect(page.getByTestId("connection-status")).toHaveText(/live/i, { timeout: 10_000 });
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  const size = await page.evaluate(() => getComputedStyle(document.body).fontSize);
+  expect(size).toBe("16px");
+  await page.close();
 });

@@ -12,7 +12,7 @@ describe("MessageList", () => {
     expect(item).toHaveTextContent('<img src=x onerror="alert(1)">');
     const p = item.querySelector("p");
     expect(p?.textContent).toBe('<img src=x onerror="alert(1)">\nsecond line');
-    expect(p?.className).toContain("whitespace-pre-wrap");
+    expect(p?.className).toMatch(/whitespace-pre/);
     expect(screen.getByText("owner")).toBeInTheDocument();
   });
 

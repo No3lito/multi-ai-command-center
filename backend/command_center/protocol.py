@@ -107,6 +107,8 @@ class RoomCreateIn(Strict):
     # Link the room to an existing workspace project, or create a new one (not both).
     project_path: str | None = Field(default=None, max_length=300)
     new_project: NewProjectIn | None = None
+    # Add every enabled agent that can answer now (Claude and GPT), so the room is ready to work.
+    add_default_agents: bool = True
 
     @field_validator("name")
     @classmethod

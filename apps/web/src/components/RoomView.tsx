@@ -5,12 +5,14 @@ import { api, isApiError } from "@/lib/api";
 import { isRunActive, type Agent, type Room, type RoomDetail } from "@/lib/types";
 import { useAgents } from "@/lib/useAgents";
 import { useDecisions } from "@/lib/useDecisions";
+import { senderStyle } from "@/lib/senderStyle";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { useOutbox } from "@/lib/useOutbox";
 import { useRoomStream } from "@/lib/useRoomStream";
 import { useRuns } from "@/lib/useRuns";
 import { useUsage } from "@/lib/useUsage";
 import { AgentsPanel, type RoomAgent } from "./AgentsPanel";
+import { Avatar } from "./Avatar";
 import { ConnectionsPanel } from "./ConnectionsPanel";
 import { DecisionsPanel } from "./DecisionsPanel";
 import { HistoryPanel } from "./HistoryPanel";
@@ -60,6 +62,12 @@ export function RoomView(props: Props) {
   const { addRun } = runs;
   const archiveRun = useCallback(async (runId: string) => addRun(await api.archiveRun(runId)), [addRun]);
   const closeGoal = useCallback(() => setGoalOpen(false), []);
+  // The browser tab shows how many decisions wait, e.g. "(2) Command Center".
+  const waiting = decisions.decisions.filter((d) => d.status === "pending").length;
+  useEffect(() => {
+    const base = "Multi-AI Command Center";
+    document.title = waiting > 0 ? `(${waiting}) ${base}` : base;
+  }, [waiting]);
   const fileInbox = useCallback(
     async (name: string, projectPath: string) => {
       await api.fileInboxItem(name, projectPath);
@@ -184,6 +192,15 @@ export function RoomView(props: Props) {
                 className="shrink-0 rounded bg-panel-2 px-1.5 py-px text-[11px] text-muted"
               >
                 Project: {projectTitle(workspace, roomDetail.project_path)}
+              </span>
+            )}
+            {roomDetail && (
+              <span data-testid="room-members" className="flex shrink-0 items-center -space-x-1.5 self-center">
+                {roomDetail.members
+                  .filter((m) => m.kind !== "owner" && m.kind !== "human")
+                  .map((m) => (
+                    <Avatar key={m.id} style={senderStyle(m)} label={m.display_name} size={20} />
+                  ))}
               </span>
             )}
             {memberCount !== undefined && (
@@ -366,7 +383,12 @@ export function RoomView(props: Props) {
         )}
       </RightPanel>
       {goalOpen && roomDetail && !notFound && roomId && (
-        <Modal title="New goal" onClose={closeGoal}>
+        <Modal
+          title={`New goal · ${roomName}${
+            roomDetail.project_path ? ` · ${projectTitle(workspace, roomDetail.project_path)}` : ""
+          }`}
+          onClose={closeGoal}
+        >
           <CollabForm
             roomId={roomId}
             roomAgents={roomAgents}

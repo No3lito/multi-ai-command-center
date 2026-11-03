@@ -24,10 +24,48 @@ const WS = {
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
+const agent = (id: string, name: string, provider: string, status: string) => ({
+  id,
+  kind: "agent",
+  display_name: name,
+  role: "Co-designer",
+  provider,
+  model: "m",
+  system_prompt: "",
+  max_output_tokens: 1000,
+  enabled: true,
+  status,
+  price: null,
+});
+const AGENTS = [
+  agent("agt_c", "Claude", "anthropic", "live"),
+  agent("agt_g", "GPT", "openai", "live"),
+  agent("agt_x", "Grok", "xai", "missing_key"),
+];
+const MEMBERS = [
+  { id: "usr_n", kind: "owner", display_name: "Noel" },
+  { id: "agt_c", kind: "agent", display_name: "Claude" },
+  { id: "agt_g", kind: "agent", display_name: "GPT" },
+];
+const runs: Record<string, unknown>[] = [];
+const failRun = { next: false };
+
 function fakeServer(workspace: unknown) {
+  runs.length = 0;
   const posts: unknown[] = [];
   setFetchImpl(async (input: string, init?: RequestInit) => {
     if (input === "/api/workspace") return json(200, workspace);
+    if (input === "/api/agents") return json(200, AGENTS);
+    if (input.startsWith("/api/rooms/room_x") && input.endsWith("/runs") && init?.method === "POST") {
+      runs.push(JSON.parse(String(init.body)));
+      if (failRun.next) {
+        failRun.next = false;
+        return json(500, { error: { code: "boom", message: "provider down" } });
+      }
+      return json(201, { id: "run_1" });
+    }
+    if (input === "/api/rooms/room_x")
+      return json(200, { id: "room_x", name: "x", created_at: "", member_count: 3, last_seq: 0, members: MEMBERS });
     if (input === "/api/rooms" && init?.method === "POST") {
       const body = JSON.parse(String(init.body));
       posts.push(body);
@@ -87,5 +125,53 @@ describe("NewRoomForm with a workspace", () => {
     expect(screen.queryByTestId("new-room-project")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("new-room-submit"));
     await waitFor(() => expect(posts).toEqual([{ name: "Ops" }]));
+  });
+});
+
+describe("New project: create and start", () => {
+  it("creates the project room and starts Claude and GPT on the goal in one click", async () => {
+    const user = userEvent.setup();
+    const posts = fakeServer(WS);
+    const onCreated = vi.fn();
+    const onDone = vi.fn();
+    render(<NewRoomForm onCreated={onCreated} onDone={onDone} />);
+    await user.type(screen.getByTestId("new-room-name"), "Polymarket bot");
+    expect(screen.getByTestId("new-room-start")).toBeDisabled();
+    await user.type(screen.getByTestId("new-room-goal"), "Find three strategies to paper test");
+    expect(screen.getByTestId("new-room-preview")).toHaveTextContent("collaborate on it right away");
+    await user.click(screen.getByTestId("new-room-start"));
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(posts).toEqual([
+      {
+        name: "Polymarket bot",
+        new_project: { family: "trading", name: "Polymarket bot", goal: "Find three strategies to paper test" },
+      },
+    ]);
+    expect(runs).toEqual([
+      expect.objectContaining({
+        goal: "Find three strategies to paper test",
+        workflow: "collab",
+        planner_id: "agt_c",
+        critic_id: "agt_g",
+      }),
+    ]);
+    expect(onCreated).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the room when the run fails, and Retry starts only the run", async () => {
+    const user = userEvent.setup();
+    const posts = fakeServer(WS);
+    failRun.next = true;
+    const onDone = vi.fn();
+    render(<NewRoomForm onCreated={() => {}} onDone={onDone} />);
+    await user.type(screen.getByTestId("new-room-name"), "Bot");
+    await user.type(screen.getByTestId("new-room-goal"), "Do it");
+    await user.click(screen.getByTestId("new-room-start"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The room was created, but the run did not start");
+    expect(screen.getByTestId("new-room-start")).toHaveTextContent("Retry starting the run");
+    await user.click(screen.getByTestId("new-room-start"));
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(posts).toHaveLength(1);
+    expect(runs).toHaveLength(2);
   });
 });

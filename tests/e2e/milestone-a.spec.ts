@@ -97,6 +97,7 @@ test("sign in, chat, live updates across tabs, persistence and reconnect", async
 
   // Create a room, then reload: rooms and messages persist.
   const roomName = `E2E ${Date.now()}`;
+  await a.getByTestId("new-project-open").click();
   await a.getByTestId("new-room-name").fill(roomName);
   await a.getByTestId("new-room-submit").click();
   await openRoom(a, roomName);
