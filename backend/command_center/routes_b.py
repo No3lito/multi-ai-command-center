@@ -99,7 +99,7 @@ async def seed(db: Database, settings: Settings) -> str:
                     provider=provider,
                     model=model,
                     system_prompt=prompt,
-                    max_output_tokens=2048,
+                    max_output_tokens=8000,
                     enabled=True,
                 )
             )

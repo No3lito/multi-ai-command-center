@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     # A run waiting for an external agent fails after this long without an answer.
     external_task_timeout_hours: float = Field(default=24.0, gt=0, le=24 * 30)
     default_claude_model: str = "claude-sonnet-5-5"
+    # Thinking effort for Claude ("low", "medium", "high"; empty = the model's default).
+    anthropic_effort: str = "medium"
     default_openai_model: str = "gpt-6.1-sol"
     # Grok is the builder: xAI's coding model by default (cheapest Grok text model, $1/$2 per
     # 1M). Switch the agent to grok-4.7 at will (a reasoning model, so less predictable cost).

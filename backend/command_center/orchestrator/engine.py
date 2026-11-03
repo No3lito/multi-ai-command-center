@@ -48,6 +48,9 @@ RESEARCH_ONLY = (
     "the owner's decisions alone."
 )
 FEASIBILITY_MAX_TOKENS = 400
+# Reviewer and designer steps: room for the model's thinking plus a long answer (thinking
+# tokens count toward the limit on Claude 5.5 and GPT reasoning models).
+DEEP_STEP_MAX_TOKENS = 12_000
 BUILD_MAX_TOKENS = 8192
 FINISHED = {"completed", "failed", "cancelled", "budget_exceeded"}
 
@@ -445,7 +448,18 @@ class BuiltinEngine:
         current = await self._load(run.id)
         if current is None or current.status == "cancelled":
             return None  # cancelled while the model was thinking; usage is still recorded
-        text = result.response.text.strip() or "(empty response)"
+        text = result.response.text.strip()
+        if not text:
+            # Usually the whole output budget went to thinking. Say so plainly instead of
+            # posting an empty message, and stop the run so it can be rerun with more room.
+            reason = (
+                f"{name} used its whole output limit ({req.max_output_tokens} tokens) on thinking "
+                "and wrote no answer. The call was still paid for. Raise the limit or rerun."
+                if result.response.truncated
+                else f"{name} returned an empty answer."
+            )
+            await self._fail(run, "failed", reason)
+            return None
         if result.response.truncated:
             text += (
                 f"\n\n[Cut off: this answer reached {name}'s output limit of {req.max_output_tokens} tokens.]"
@@ -565,7 +579,9 @@ class BuiltinEngine:
                 reply_to=run.last_message_id,
                 data={"run_id": run.id, "status": "running", "step": run.step},
             )
-            msg_id = await self._agent_turn(run, agent_id, instruction, run.step, assign_id)
+            msg_id = await self._agent_turn(
+                run, agent_id, instruction, run.step, assign_id, DEEP_STEP_MAX_TOKENS
+            )
             if msg_id is None or msg_id == WAITING:
                 return False
             await self._update(run.id, step=next_step(run.step))
@@ -612,7 +628,7 @@ class BuiltinEngine:
                 f"decisions, and how to check that it works. {b} will build exactly what the final "
                 "design says, including any code-level instructions (language, libraries, names, "
                 "patterns), so be specific wherever it matters.",
-                None,
+                DEEP_STEP_MAX_TOKENS,
             ),
             "codesign": (
                 run.critic_id,
@@ -620,7 +636,7 @@ class BuiltinEngine:
                 f"{shared} Improve {p}'s draft as an equal partner: fix gaps and risks, simplify, "
                 "and add what is missing, including code-level instructions where they matter. "
                 "Say clearly what you changed and why. Do not write the implementation.",
-                None,
+                DEEP_STEP_MAX_TOKENS,
             ),
             "feasibility": (
                 run.builder_id,
@@ -636,7 +652,7 @@ class BuiltinEngine:
                 f"{shared} Write the final design that you and {c} agree on, folding in {c}'s "
                 f"improvements and {b}'s build note. This is the specification {b} will build "
                 "from: complete and concrete, with no open questions unless they truly block.",
-                None,
+                DEEP_STEP_MAX_TOKENS,
             ),
             "build": (
                 run.builder_id,
@@ -657,7 +673,7 @@ class BuiltinEngine:
                 f"give {b} numbered fix instructions, most important first, precise enough to "
                 "apply without guessing (file, what to change, what it should be). Do not "
                 "rewrite the code yourself.",
-                None,
+                DEEP_STEP_MAX_TOKENS,
             ),
             "fix": (
                 run.builder_id,
@@ -799,7 +815,9 @@ class BuiltinEngine:
                 reply_to=run.last_message_id,
                 data={"run_id": run.id, "status": "running", "step": run.step},
             )
-            msg_id = await self._agent_turn(run, agent_id, instruction, run.step, assign_id)
+            # The worker's steps are external; the reviewers get room to think.
+            limit = None if agent_id == run.builder_id else DEEP_STEP_MAX_TOKENS
+            msg_id = await self._agent_turn(run, agent_id, instruction, run.step, assign_id, limit)
             if msg_id is None or msg_id == WAITING:
                 return False
             await self._update(run.id, step=next_step(run.step, "review"))

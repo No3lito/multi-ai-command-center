@@ -247,6 +247,9 @@ async def test_review_with_grok_bot_over_mcp(fresh_database_url: str, tmp_path: 
                 assert all(rule in json.dumps(b) for b in reviewer_calls), (
                     "every reviewer step carries the rule"
                 )
+                anthropic_bodies = [q["body"] for q in calls["requests"] if q["provider"] == "anthropic"]
+                assert [b["max_tokens"] for b in anthropic_bodies] == [12_000, 12_000], "room to think"
+                assert all(b["output_config"] == {"effort": "medium"} for b in anthropic_bodies)
 
 
 async def test_cancel_a_waiting_run(sim_srv: Server) -> None:

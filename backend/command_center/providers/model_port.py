@@ -98,7 +98,7 @@ class ModelPort:
 
     def _default_factory(self, provider: str, api_key: str) -> ProviderAdapter:
         if provider == "anthropic":
-            return AnthropicAdapter(api_key)
+            return AnthropicAdapter(api_key, effort=self.settings.anthropic_effort or None)
         if provider == "openai":
             return OpenAIAdapter(api_key)
         if provider == "xai":

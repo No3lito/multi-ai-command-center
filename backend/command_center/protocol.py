@@ -149,7 +149,7 @@ class AgentIn(Strict):
     provider: ProviderName
     model: str = Field(pattern=MODEL_NAME)
     system_prompt: str = Field(default="", max_length=8000)
-    max_output_tokens: int = Field(default=2048, ge=16, le=8192)
+    max_output_tokens: int = Field(default=8000, ge=16, le=8192)
     enabled: bool = True
 
 

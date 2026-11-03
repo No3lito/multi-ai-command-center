@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Literal, cast
+
 import anthropic
 import httpx2
-from anthropic.types import MessageParam, TextBlock
+from anthropic.types import MessageParam, OutputConfigParam, TextBlock
 
 from command_center.providers.base import Capabilities, ChatRequest, ChatResponse, ErrorCode, ProviderError
+
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
 
 class AnthropicAdapter:
@@ -14,8 +18,20 @@ class AnthropicAdapter:
     simulated = False
 
     def __init__(
-        self, api_key: str, *, http_client: httpx2.AsyncClient | None = None, timeout: float = 90.0
+        self,
+        api_key: str,
+        *,
+        http_client: httpx2.AsyncClient | None = None,
+        timeout: float = 90.0,
+        effort: str | None = "medium",
     ) -> None:
+        # Claude 5.5 models think before answering by default, and thinking tokens count toward
+        # max_tokens. "medium" keeps thinking proportionate so the answer fits; None leaves
+        # the model's own default (Sonnet 5.5: "high").
+        self.effort = effort
+        self._output_config: OutputConfigParam | anthropic.Omit = (
+            {"effort": cast(Effort, effort)} if effort else anthropic.omit
+        )
         # max_retries=0: retries would re-send a paid request outside our budget reservation.
         self._client = anthropic.AsyncAnthropic(
             api_key=api_key, http_client=http_client, timeout=timeout, max_retries=0
@@ -31,6 +47,7 @@ class AnthropicAdapter:
                 max_tokens=req.max_output_tokens,
                 system=req.system,
                 messages=[_message(m.role, m.content) for m in req.messages],
+                output_config=self._output_config,
             )
         except anthropic.AuthenticationError as exc:
             raise ProviderError(

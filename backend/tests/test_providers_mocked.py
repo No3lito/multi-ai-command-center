@@ -95,6 +95,7 @@ async def test_anthropic_request_shape_and_usage() -> None:
     body = json.loads(req.content)
     assert body["model"] == "claude-sonnet-5-5"
     assert body["max_tokens"] == 64
+    assert body["output_config"] == {"effort": "medium"}, "Claude 5.5 thinks less so the answer fits"
     assert body["system"] == "You are a test agent."
     assert body["messages"] == [{"role": "user", "content": "Say hello."}]
 
