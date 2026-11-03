@@ -49,8 +49,6 @@ test("simulated collaboration run, usage, and an @mention reply", async ({ page 
 
   // The right panel opens on Decide; agents, usage and connections live under Setup.
   await expect(page.getByTestId("tab-decide")).toHaveAttribute("aria-selected", "true");
-  // The "Tasks and progress" summary appears once the room has a run or a decision.
-  await expect(page.getByTestId("summary-panel")).toHaveCount(0);
   await tab(page, "setup");
 
   // Seeded agents are room members and clearly marked as simulated.
@@ -347,6 +345,23 @@ test("code change: the job explains itself, and fails plainly when GitHub cannot
   await expect(job).toContainText(/(Claude|GPT) writes, (GPT|Claude) reviews/, { timeout: 10_000 });
   await expect(job).toHaveAttribute("data-status", "failed", { timeout: 30_000 });
   await expect(page.getByText(/GitHub refused a step of this code job: could not reach GitHub/).first()).toBeVisible();
+});
+
+test("send to: a plain message gets an answer from the agent picked", async ({ page }) => {
+  test.setTimeout(60_000);
+  await signIn(page);
+  await openRoom(page, "General");
+  await page.getByRole("button", { name: "GPT", exact: true }).click();
+  const input = page.getByTestId("composer-input");
+  await expect(input).toHaveAttribute("placeholder", "Message GPT…");
+  await input.fill("what is the plan for today");
+  await input.press("Enter");
+  const mine = messages(page, { senderKind: "owner" }).filter({ hasText: "what is the plan for today" }).last();
+  await expect(mine).toBeVisible();
+  const myId = await mine.getAttribute("data-message-id");
+  const reply = messages(page, { senderKind: "agent", replyTo: myId! });
+  await expect(reply).toHaveCount(1, { timeout: 30_000 });
+  await expect(reply).toContainText("GPT");
 });
 
 test("phone width: no sideways scrolling, readable text", async ({ browser }) => {

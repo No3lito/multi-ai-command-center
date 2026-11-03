@@ -28,6 +28,31 @@ interface Props {
 }
 
 const NO_AGENTS: readonly MentionAgent[] = [];
+const TO_KEY = "composer-send-to";
+/** "none": a note to the room, nobody replies. "all": every agent replies. Else one agent's id. */
+export type SendTo = "none" | "all" | string;
+
+/** Who answers by default: the last choice if it still exists, else Claude, else the first agent. */
+export function defaultSendTo(agents: readonly MentionAgent[], saved: string | null): SendTo {
+  if (saved === "none" || (saved === "all" && agents.length > 1)) return saved;
+  if (saved && agents.some((a) => a.id === saved)) return saved;
+  const claude = agents.find((a) => a.display_name.toLowerCase().startsWith("claude"));
+  return claude?.id ?? agents[0]?.id ?? "none";
+}
+
+/** The agents a message goes to: the ones picked under "Send to" plus any @mentioned in the text. */
+export function recipients(to: SendTo, agents: readonly MentionAgent[], inText: string[]): string[] {
+  const picked = to === "all" ? agents.map((a) => a.id) : to === "none" ? [] : [to];
+  return [...new Set([...picked.filter((id) => agents.some((a) => a.id === id)), ...inText])];
+}
+
+function readSaved(): string | null {
+  try {
+    return window.localStorage.getItem(TO_KEY);
+  } catch {
+    return null;
+  }
+}
 
 /** Shared by RoomView and delivery integration tests. Retry stays in the outbox. */
 export function composerDeliveryState(pending: readonly { status: string }[]) {
@@ -41,11 +66,37 @@ export function composerDeliveryState(pending: readonly { status: string }[]) {
  * Enter sends, Shift+Enter inserts a newline. Send is disabled while empty.
  * Typing "@" opens an autocomplete of room agents (arrows, Enter or Tab to pick, Esc to close).
  */
-export function Composer({ onSend, disabled, sending = false, deliveryError = false, roomName, agents = NO_AGENTS }: Props) {
+export function Composer({
+  onSend,
+  disabled,
+  sending = false,
+  deliveryError = false,
+  roomName,
+  agents = NO_AGENTS,
+}: Props) {
   const [text, setText] = useState("");
   const [query, setQuery] = useState<MentionQuery | null>(null);
   const [active, setActive] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
+  const [toChoice, setToChoice] = useState<SendTo | null>(null);
+  const sendTo =
+    toChoice !== null && (toChoice === "none" || toChoice === "all" || agents.some((a) => a.id === toChoice))
+      ? toChoice
+      : defaultSendTo(agents, typeof window === "undefined" ? null : readSaved());
+  function chooseTo(next: SendTo) {
+    setToChoice(next);
+    try {
+      window.localStorage.setItem(TO_KEY, next);
+    } catch {
+      // Storage may be off; the choice still holds while this page is open.
+    }
+  }
+  const toName =
+    sendTo === "all"
+      ? "Everyone"
+      : sendTo === "none"
+        ? null
+        : (agents.find((a) => a.id === sendTo)?.display_name ?? null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pendingCaret = useRef<number | null>(null);
   const hintId = useId();
@@ -91,7 +142,7 @@ export function Composer({ onSend, disabled, sending = false, deliveryError = fa
 
   function submit() {
     if (!canSend) return;
-    onSend(trimmed, extractMentions(trimmed, agents));
+    onSend(trimmed, recipients(sendTo, agents, extractMentions(trimmed, agents)));
     setText("");
     setQuery(null);
   }
@@ -146,6 +197,36 @@ export function Composer({ onSend, disabled, sending = false, deliveryError = fa
       <label htmlFor="composer-input" className="sr-only">
         {roomName ? `Message #${roomName}` : "Message"}
       </label>
+      {agents.length > 0 && (
+        <div
+          role="group"
+          aria-label="Send to"
+          data-testid="send-to"
+          className="mb-2 flex flex-wrap items-center gap-1.5"
+        >
+          <span className="mr-1 text-[13px] font-medium text-muted">Send to</span>
+          {[
+            ...agents.map((a) => ({ id: a.id as SendTo, label: a.display_name })),
+            ...(agents.length > 1 ? [{ id: "all" as SendTo, label: "Everyone" }] : []),
+            { id: "none" as SendTo, label: "No one (note)" },
+          ].map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              data-testid="send-to-option"
+              aria-pressed={sendTo === o.id}
+              onClick={() => chooseTo(o.id)}
+              className={`min-h-8 rounded-full border px-3 text-[13px] font-medium ${
+                sendTo === o.id
+                  ? "border-accent bg-accent-soft text-fg"
+                  : "border-line bg-transparent text-muted hover:text-fg"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="relative">
         {open && (
           <ul
@@ -195,7 +276,9 @@ export function Composer({ onSend, disabled, sending = false, deliveryError = fa
             onBlur={() => setQuery(null)}
             onKeyDown={onKeyDown}
             disabled={disabled}
-            placeholder="Message the team…"
+            placeholder={
+              toName ? `Message ${toName === "Everyone" ? "everyone" : toName}…` : "Write a note to the room…"
+            }
             aria-describedby={hintId}
             aria-autocomplete="list"
             aria-controls={open ? listId : undefined}
@@ -213,9 +296,13 @@ export function Composer({ onSend, disabled, sending = false, deliveryError = fa
         </div>
       </div>
       <p role="status" aria-atomic="true" className="mt-2 text-[13px] text-muted">
-        {disabled ? "Messaging unavailable." : deliveryError
-          ? "A message was not sent. Use Retry or Discard on the message above."
-          : sending ? "Sending…" : ""}
+        {disabled
+          ? "Messaging unavailable."
+          : deliveryError
+            ? "A message was not sent. Use Retry or Discard on the message above."
+            : sending
+              ? "Sending…"
+              : ""}
       </p>
       <p id={hintId} className="mt-1 text-[13px] text-muted">
         {tooLong ? (
@@ -223,7 +310,9 @@ export function Composer({ onSend, disabled, sending = false, deliveryError = fa
             Message is too long ({trimmed.length.toLocaleString()} of {MESSAGE_TEXT_MAX.toLocaleString()} characters).
           </span>
         ) : (
-          "Message the team… (Enter to send, Shift+Enter for new line). Mention an agent with @ to ask it directly."
+          `${
+            toName ? `${toName === "Everyone" ? "Every agent" : toName} will reply.` : "Nobody replies to a note."
+          } Enter to send, Shift+Enter for a new line.`
         )}
       </p>
     </form>
