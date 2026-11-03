@@ -31,6 +31,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.11.32"
+      # The Docker image installs without dev tools: the app must import with only its own dependencies.
+      - run: UV_PROJECT_ENVIRONMENT=/tmp/prod uv sync --frozen --no-dev && /tmp/prod/bin/python -c "import command_center.app"
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
