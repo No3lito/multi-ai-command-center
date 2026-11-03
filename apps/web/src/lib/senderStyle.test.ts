@@ -20,6 +20,25 @@ describe("senderStyle", () => {
     expect(senderStyle({ kind: "agent", display_name: "Gemini" })).toMatchObject({ key: "other", initial: "G" });
   });
 
+  it("allocates distinct colors to duplicate known names", () => {
+    const senders = [
+      { id: "first", kind: "agent", display_name: "Claude" },
+      { id: "second", kind: "agent", display_name: "Claude" },
+      { id: "grok", kind: "agent", display_name: "Grok" },
+      { id: "other", kind: "external", display_name: "External tool" },
+    ];
+    const styles = assignSpeakerStyles(senders);
+    expect(new Set([...styles.values()].map((style) => style.color)).size).toBe(4);
+    expect(styles.get("agent:first")?.color).toBe("var(--speaker-claude)");
+    expect(styles.get("agent:second")?.color).toBe("var(--speaker-blue)");
+  });
+
+  it("supports CSS-variable avatar tints without parsing them as hex", () => {
+    expect(tint("var(--speaker-claude)", 0.12)).toBe(
+      "color-mix(in srgb, var(--speaker-claude) 12%, transparent)",
+    );
+  });
+
   it("tints colors", () => expect(tint("#E8955A", 0.12)).toBe("rgba(232, 149, 90, 0.12)"));
 
   it("allocates unused colors and preserves existing room identities", () => {

@@ -35,6 +35,7 @@ describe("Markdown", () => {
     const user = userEvent.setup();
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
     render(<Markdown text={"```ts\nconst value = 1;\n```"} />);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     const code = screen.getByLabelText("Code block");
     expect(code).toHaveAttribute("tabindex", "0");
     expect(code).toHaveClass("overflow-x-auto");

@@ -43,7 +43,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
   return (
     <div className="code-block">
       <div className="flex flex-wrap items-center justify-end gap-2 px-2 py-1">
-        <span role="status" className="text-[13px] text-muted">{status}</span>
+        {status && <span role="status" className="text-[13px] text-muted">{status}</span>}
         <button type="button" onClick={() => void copy()} className="rounded border border-line bg-panel px-2 py-1 text-[13px]">
           Copy code
         </button>

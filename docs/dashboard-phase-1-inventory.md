@@ -58,6 +58,26 @@ props, and workflows are retained without rewriting their internal controls.
   or progress is introduced. Setup and other management panels remain.
 - Sender name, initials, role, and metadata identify speakers without color.
 
+## Review fixes
+
+- Participant avatars, delivered cards, and pending cards use room-allocated
+  identities; message rendering no longer bypasses allocation with fixed fallbacks.
+- Newly discovered identities are committed after rendering, not during it.
+- Grouped messages omit repeated identity headers in JSX while retaining each
+  message's timestamp, sequence, model, usage, and other delivery metadata.
+- External integrations receive the System role badge and retain their explicit
+  external-kind badge; only agent principals receive the AI role badge.
+- Populated task summaries are collapsible above the details tabs, rather than
+  discoverable only within Decide. Existing tab content remains available.
+- Rose styling uses an explicit accent attribute. The existing global
+  focus-visible rule remains; the resize separator no longer suppresses outlines.
+- The composer retains one persistent status region; code blocks expose status
+  only after a copy attempt.
+- Added regression coverage for scrolled-up reading, allocated identities,
+  rose accents, non-color identity labels, and outbox-derived composer states.
+  The outbox integration harness uses the same delivery-state helper as RoomView;
+  it does not replace a complete RoomView integration or browser test.
+
 ## Verification still required
 
 Run the web test suite and type/lint checks. Review populated desktop and

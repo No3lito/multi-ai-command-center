@@ -29,6 +29,14 @@ interface Props {
 
 const NO_AGENTS: readonly MentionAgent[] = [];
 
+/** Shared by RoomView and delivery integration tests. Retry stays in the outbox. */
+export function composerDeliveryState(pending: readonly { status: string }[]) {
+  return {
+    sending: pending.some((item) => item.status !== "failed"),
+    deliveryError: pending.some((item) => item.status === "failed"),
+  };
+}
+
 /**
  * Enter sends, Shift+Enter inserts a newline. Send is disabled while empty.
  * Typing "@" opens an autocomplete of room agents (arrows, Enter or Tab to pick, Esc to close).
@@ -204,7 +212,7 @@ export function Composer({ onSend, disabled, sending = false, deliveryError = fa
           </button>
         </div>
       </div>
-      <p role="status" className="mt-2 text-[13px] text-muted">
+      <p role="status" aria-atomic="true" className="mt-2 text-[13px] text-muted">
         {disabled ? "Messaging unavailable." : deliveryError
           ? "A message was not sent. Use Retry or Discard on the message above."
           : sending ? "Sending…" : ""}

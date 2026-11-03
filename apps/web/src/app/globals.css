@@ -111,7 +111,7 @@ body {
 }
 
 /* Rose remains an accent only, rather than a large pink surface. */
-.speaker-card[style*="--speaker-rose"] {
+.speaker-card[data-accent="rose"] {
   background: var(--panel);
 }
 
@@ -129,10 +129,6 @@ body {
   box-shadow: none;
 }
 
-.speaker-group-metadata > :first-child,
-.speaker-group-metadata > :nth-child(2) {
-  display: none;
-}
 
 .speaker-role {
   display: inline-block;

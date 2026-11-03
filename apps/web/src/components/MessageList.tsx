@@ -5,7 +5,8 @@ import { formatCount, formatUsd } from "@/lib/format";
 import { foldRuns } from "@/lib/foldRuns";
 import { isRunActive, type Message, type PrincipalKind, type Run } from "@/lib/types";
 import type { PendingMessage } from "@/lib/useOutbox";
-import { assignSpeakerStyles, senderStyle, speakerId, type SenderStyle, type Speaker } from "@/lib/senderStyle";
+import { speakerId, type SenderStyle, type Speaker } from "@/lib/senderStyle";
+import { useSpeakerStyles } from "@/lib/useSpeakerStyles";
 import { Avatar } from "./Avatar";
 import { bottomLine } from "./DecisionsPanel";
 import { Folded, Markdown } from "./Markdown";
@@ -61,13 +62,17 @@ interface Props {
   runs?: Run[];
   onArchive?: (runId: string) => Promise<unknown>;
   participants?: readonly Speaker[];
+  speakerStyles?: ReadonlyMap<string, SenderStyle>;
 }
 
-export function MessageList({ messages, pending, loading, onRetry, onDiscard, runs, onArchive, participants = [] }: Props) {
-  const [identities, setIdentities] = useState<ReadonlyMap<string, SenderStyle>>(() => new Map());
+export function MessageList({ messages, pending, loading, onRetry, onDiscard, runs, onArchive, participants = [], speakerStyles }: Props) {
   const senders = [...participants, ...messages.map((message) => message.sender)];
-  const styles = assignSpeakerStyles(senders, identities);
-  if (styles.size !== identities.size) setIdentities(styles);
+  const localStyles = useSpeakerStyles(senders);
+  const styles = speakerStyles ?? localStyles;
+  const pendingSender = senders.find((sender) => sender.kind === "owner") ??
+    senders.find((sender) => sender.kind === "human") ??
+    { id: "pending-owner", kind: "owner", display_name: "You" };
+  const pendingStyle = styles.get(speakerId(pendingSender))!;
   // Runs the owner watched in progress stay open after they finish; older ones start folded.
   const [seenActive, setSeenActive] = useState<ReadonlySet<string>>(() => new Set());
   const [openRuns, setOpenRuns] = useState<Record<string, boolean>>({});
@@ -100,7 +105,7 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard, ru
   const lastId = messages[messages.length - 1]?.id;
   const total = messages.length + pending.length;
 
-  // Auto-scroll when already near the bottom; otherwise offer "Jump to latest".
+  // Auto-scroll only when already near the bottom; otherwise offer "New messages".
   useLayoutEffect(() => {
     if (total === 0) return;
     if (nearBottomRef.current) scrollToBottom();
@@ -149,7 +154,7 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard, ru
               <MessageRow
                 key={item.message.id}
                 message={item.message}
-                style={styles.get(speakerId(item.message.sender))}
+                style={styles.get(speakerId(item.message.sender))!}
                 grouped={(() => {
                   const prev = items[i - 1];
                   return (
@@ -174,7 +179,7 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard, ru
             ),
           )}
           {pending.map((p) => (
-            <PendingRow key={p.key} item={p} onRetry={onRetry} onDiscard={onDiscard} />
+            <PendingRow key={p.key} item={p} style={pendingStyle} onRetry={onRetry} onDiscard={onDiscard} />
           ))}
         </ol>
       </div>
@@ -307,9 +312,14 @@ function RunFold({
             <MessageRow
               key={m.id}
               message={m}
-              style={styles.get(speakerId(m.sender))}
-              grouped={m.sender.kind !== "system" && index > 0 &&
-                speakerId(messages[index - 1].sender) === speakerId(m.sender)}
+              style={styles.get(speakerId(m.sender))!}
+              grouped={(() => {
+                const previous = messages[index - 1];
+                return previous !== undefined &&
+                  m.sender.kind !== "system" &&
+                  previous.sender.kind !== "system" &&
+                  speakerId(previous.sender) === speakerId(m.sender);
+              })()}
             />
           ))}
         </ol>
@@ -331,10 +341,10 @@ export function isSimulatedMessage(message: Message): boolean {
 function MessageRow({ message, grouped = false, style }: {
   message: Message;
   grouped?: boolean;
-  style?: SenderStyle;
+  style: SenderStyle;
 }) {
   if (message.sender.kind === "system") return <SystemNote message={message} />;
-  return <ChatRow message={message} grouped={grouped} style={style ?? senderStyle(message.sender)} />;
+  return <ChatRow message={message} grouped={grouped} style={style} />;
 }
 
 export function SimulatedBadge() {
@@ -366,30 +376,32 @@ function ChatRow({ message, grouped, style }: { message: Message; grouped: boole
       data-seq={message.seq}
       data-sender-kind={message.sender.kind}
       data-sender-style={style.key}
+      data-accent={style.color === "var(--speaker-rose)" ? "rose" : undefined}
       data-simulated={simulated || undefined}
       data-correlation-id={message.correlation_id ?? undefined}
       data-reply-to={message.reply_to ?? undefined}
       data-grouped={grouped || undefined}
-      aria-label={`${message.sender.display_name}, ${mine ? "You" : "AI"}`}
       style={{ "--speaker-color": style.color } as CSSProperties}
       className={`group speaker-card ${grouped ? "speaker-continuation" : ""} ${mine ? "speaker-owner" : ""}`}
     >
       <div className="min-w-0">
-        {!grouped && <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-          <Avatar style={style} label={message.sender.display_name} />
-          <span className="speaker-role">{mine ? "You" : "AI"}</span>
-        </div>}
-        <div className={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 ${grouped ? "speaker-group-metadata" : ""}`}>
-          <span className="inline-flex items-center gap-2 font-semibold text-fg">
-            <span
-              aria-hidden="true"
-              data-testid="agent-dot"
-              className="h-2 w-2 shrink-0 rounded-full"
-              style={{ background: style.color }}
-            />
-            {message.sender.display_name}
-          </span>
-          <KindBadge kind={message.sender.kind} />
+        {!grouped && (
+          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <Avatar style={style} label={message.sender.display_name} />
+            <span className="inline-flex items-center gap-2 font-semibold text-fg">
+              <span
+                aria-hidden="true"
+                data-testid="agent-dot"
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ background: style.color }}
+              />
+              {message.sender.display_name}
+            </span>
+            <span className="speaker-role">{mine ? "You" : isAgent ? "AI" : "System"}</span>
+            <KindBadge kind={message.sender.kind} />
+          </div>
+        )}
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           {(provider || model) && (
             <span data-testid="message-model" className="font-mono text-[10px] text-muted">
               {[provider, model].filter(Boolean).join(" / ")}
@@ -490,10 +502,12 @@ function ErrorIcon() {
 
 function PendingRow({
   item,
+  style,
   onRetry,
   onDiscard,
 }: {
   item: PendingMessage;
+  style: SenderStyle;
   onRetry: (key: string) => void;
   onDiscard: (key: string) => void;
 }) {
@@ -502,15 +516,20 @@ function PendingRow({
     <li
       data-testid="message-item"
       data-pending={item.status}
-      className={`rounded-md px-2 py-1.5 ${failed ? "bg-danger-soft" : "opacity-60"}`}
+      data-sender-style={style.key}
+      data-accent={style.color === "var(--speaker-rose)" ? "rose" : undefined}
+      style={{ "--speaker-color": style.color } as CSSProperties}
+      className="speaker-card speaker-owner"
     >
-      <div className="flex items-baseline gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <Avatar style={style} label="You" />
         <span className="font-semibold">You</span>
+        <span className="speaker-role">You</span>
         <span className="text-xs text-muted">{failed ? "Not sent" : "Sending..."}</span>
       </div>
       <p className="whitespace-pre-wrap break-words">{item.text}</p>
       {failed && (
-        <div className="mt-1 flex items-center gap-3 text-xs">
+        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs">
           <span className="text-danger">{item.error}</span>
           <button type="button" onClick={() => onRetry(item.key)} className="font-medium text-fg underline">
             Retry

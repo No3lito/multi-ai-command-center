@@ -5,7 +5,8 @@ import { api, isApiError } from "@/lib/api";
 import { isRunActive, type Agent, type CodeJobs, type Room, type RoomDetail } from "@/lib/types";
 import { useAgents } from "@/lib/useAgents";
 import { useDecisions } from "@/lib/useDecisions";
-import { assignSpeakerStyles, speakerId } from "@/lib/senderStyle";
+import { speakerId } from "@/lib/senderStyle";
+import { useSpeakerStyles } from "@/lib/useSpeakerStyles";
 import { useWorkspace } from "@/lib/useWorkspace";
 import { useOutbox } from "@/lib/useOutbox";
 import { useRoomStream } from "@/lib/useRoomStream";
@@ -20,7 +21,7 @@ import { InboxPanel, ProjectPanel, projectTitle } from "./ProjectPanels";
 import { Modal, RightTabs, type TabId } from "./RightTabs";
 import { SummaryPanel, lastSeenFor } from "./SummaryPanel";
 import { CollabForm } from "./CollabForm";
-import { Composer, type MentionAgent } from "./Composer";
+import { Composer, composerDeliveryState, type MentionAgent } from "./Composer";
 import { ConnectionPill } from "./ConnectionPill";
 import { MessageList } from "./MessageList";
 import { RightPanel } from "./RightPanel";
@@ -173,7 +174,10 @@ export function RoomView(props: Props) {
   const roomName = detail.kind === "ready" ? detail.detail.name : (roomSummary?.name ?? "");
   const memberCount = detail.kind === "ready" ? detail.detail.member_count : roomSummary?.member_count;
 
-  const participantStyles = assignSpeakerStyles(roomDetail?.members ?? []);
+  const participantStyles = useSpeakerStyles([
+    ...(roomDetail?.members ?? []),
+    ...stream.messages.map((message) => message.sender),
+  ]);
   const header = (
     <header className="room-header sticky top-0 z-20 flex min-h-16 shrink-0 flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2">
       <button
@@ -287,12 +291,12 @@ export function RoomView(props: Props) {
           runs={runs.runs}
           onArchive={archiveRun}
           participants={roomDetail?.members}
+          speakerStyles={participantStyles}
         />
         <Composer
           onSend={outbox.send}
           disabled={detail.kind !== "ready"}
-          sending={outbox.pending.some((item) => item.status !== "failed")}
-          deliveryError={outbox.pending.some((item) => item.status === "failed")}
+          {...composerDeliveryState(outbox.pending)}
           roomName={roomName}
           agents={mentionAgents}
         />
@@ -338,20 +342,21 @@ export function RoomView(props: Props) {
             }}
           />
         )}
+        {roomDetail && !notFound && roomId &&
+          (runs.runs.length > 0 || decisions.decisions.length > 0) && (
+            <details open className="task-progress">
+              <summary>Tasks and progress</summary>
+              <SummaryPanel
+                runs={runs.runs}
+                decisions={decisions.decisions}
+                usage={usage.usage}
+                since={lastSeenFor(roomId)}
+                agentName={agentName}
+              />
+            </details>
+          )}
         {roomDetail && !notFound && roomId && tab === "decide" && (
           <div role="tabpanel" id="tabpanel-decide" aria-labelledby="tab-decide">
-            {(runs.runs.length > 0 || decisions.decisions.length > 0) && (
-              <details open className="task-progress">
-                <summary>Tasks and progress</summary>
-                <SummaryPanel
-              runs={runs.runs}
-              decisions={decisions.decisions}
-              usage={usage.usage}
-              since={lastSeenFor(roomId)}
-              agentName={agentName}
-                />
-              </details>
-            )}
             <DecisionsPanel runs={runs.runs} decisions={decisions.decisions} onAnswer={onAnswer} />
             <InboxPanel workspace={workspace} onFile={fileInbox} />
           </div>

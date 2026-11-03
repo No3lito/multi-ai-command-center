@@ -87,7 +87,7 @@ export function RightPanel({ open, detail, status, lastSeq, hasRoom, children, s
           aria-valuenow={width}
           aria-valuetext={`${width} pixels`}
           tabIndex={0}
-          className="group absolute inset-y-0 left-0 z-10 hidden w-2 touch-none cursor-col-resize select-none outline-none xl:block"
+          className="group absolute inset-y-0 left-0 z-10 hidden w-2 touch-none cursor-col-resize select-none xl:block"
           onPointerDown={(event) => {
             if (event.button !== 0 || window.innerWidth < DESKTOP_WIDTH) return;
             event.preventDefault();
