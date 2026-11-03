@@ -156,6 +156,10 @@ def run_out(r: models.Run, attachments: list[AttachmentOut] | None = None) -> Ru
         pending_decisions=r.pending_decisions,
         archived_at=r.archived_at,
         agent_files=r.agent_files if r.agent_files is not None else True,
+        verdict=r.verdict if r.verdict in ("done", "blocked", "needs_you") else None,
+        chain_root_id=r.chain_root_id,
+        chain_depth=r.chain_depth or 0,
+        wrap_up=bool(r.wrap_up),
         id=r.id,
         room_id=r.room_id,
         kind=r.kind,
@@ -544,6 +548,28 @@ def register(
         run = await own_run(session, run_id, principal)
         return run_out(run, (await attachments_for(session, [run.id])).get(run.id))
 
+    @app.post("/api/runs/{run_id}/wrap-up", response_model=RunOut)
+    async def wrap_up_run(
+        run_id: str, request: Request, principal: PrincipalDep, session: SessionDep
+    ) -> RunOut:
+        """Ask a running plan, build or review to stop discussing and write its conclusion now."""
+        require_owner(principal)
+        run = await own_run(session, run_id, principal)
+        if run.kind == "reply" or run.status not in ("queued", "running", "waiting"):
+            raise api_error(409, "run_not_active", "Only an active plan, build or review can be wrapped up")
+        run.wrap_up = True
+        if run.status == "waiting":
+            # The external agent's step is dropped; the lead writes the brief from what is there.
+            run.status = "queued"
+            run.waiting_for = None
+            run.waiting_instruction = None
+            run.lease_expires_at = None
+        await session.commit()
+        await session.refresh(run)
+        await audit(session, "run.wrap_up", principal.id, run.id, request)
+        wake()
+        return run_out(run, (await attachments_for(session, [run.id])).get(run.id))
+
     @app.post("/api/runs/{run_id}/cancel", response_model=RunOut)
     async def cancel_run(
         run_id: str, request: Request, principal: PrincipalDep, session: SessionDep
@@ -711,7 +737,17 @@ def register(
             models.Decision.created_at.desc(),
             models.Decision.position,
         ).limit(limit)
-        return [decision_out(d, goal) for d, goal in (await session.execute(stmt)).all()]
+        out: list[DecisionOut] = []
+        for d, goal in (await session.execute(stmt)).all():
+            item = decision_out(d, goal)
+            if d.status == "pending":
+                source = await session.get(models.Run, d.run_id)
+                item.final_round = (
+                    source is not None and (source.chain_depth or 0) >= decisions_mod.MAX_ROUNDS
+                )
+                item.cannot_run_reason = await decisions_mod.plan_check(session, d, "approve")
+            out.append(item)
+        return out
 
     @app.post("/api/decisions/{decision_id}/answer", response_model=DecisionAnswerOut)
     async def answer_decision(
@@ -731,9 +767,10 @@ def register(
             raise api_error(409, "decision_already_answered", f"This decision was already {decision.status}")
         note = (body.note or "").strip() or None
         follow_up: models.Run | None = None
+        no_run_reason: str | None = None
         if body.answer in ("approve", "more_info"):
             try:
-                follow_up = await decisions_mod.start_follow_up(
+                result = await decisions_mod.start_follow_up(
                     session,
                     settings,
                     decision,
@@ -742,6 +779,7 @@ def register(
                     owner_id=principal.id,
                     budget_usd=Decimal(str(body.budget_usd)) if body.budget_usd is not None else None,
                 )
+                follow_up, no_run_reason = result.run, result.reason
             except decisions_mod.FollowUpError as exc:
                 raise api_error(409, "follow_up_failed", exc.message) from exc
         decision.status = ANSWER_STATUS[body.answer]
@@ -785,6 +823,8 @@ def register(
                 text += f"\nNote: {note}"
             if follow_up is not None:
                 text += f"\nStarted a {follow_up.kind} run (budget ${float(follow_up.budget_usd):.2f})."
+            elif no_run_reason:
+                text += f"\nNothing was started: {no_run_reason}"
             await service.append_message(
                 session,
                 decision.room_id,
@@ -812,6 +852,7 @@ def register(
         return DecisionAnswerOut(
             decision=decision_out(decision, source_goal),
             follow_up_run=run_out(follow_up, run_attachments) if follow_up is not None else None,
+            no_run_reason=no_run_reason,
         )
 
     # ------------------------------------------------------------ archive and history

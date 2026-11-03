@@ -14,6 +14,9 @@ from command_center.providers.base import ChatMessage, ChatRequest
 MAX_MESSAGES = 30
 MAX_MESSAGE_CHARS = 4_000
 MAX_TRANSCRIPT_CHARS = 24_000
+# Workflow runs (lean): only the owner's recent chat outside runs, not other runs' transcripts.
+LEAN_MESSAGES = 10
+LEAN_TRANSCRIPT_CHARS = 6_000
 # Messages of the run being executed (a design, the code built from it) are kept far more
 # completely, so a builder sees the whole design and a checker sees the whole build.
 MAX_RUN_MESSAGE_CHARS = 40_000
@@ -40,6 +43,7 @@ async def build_request(
     profile: models.AgentProfile,
     instruction: str,
     run_id: str | None = None,
+    lean: bool = False,
 ) -> ChatRequest:
     def line_for(msg: models.Message, sender: models.Principal, limit: int) -> str:
         body = msg.body_text
@@ -59,8 +63,11 @@ async def build_request(
         .join(models.Principal, models.Principal.id == models.Message.sender_id)
         .where(models.Message.room_id == room_id)
         .order_by(models.Message.seq.desc())
-        .limit(MAX_MESSAGES)
+        .limit(LEAN_MESSAGES if lean else MAX_MESSAGES)
     )
+    if lean:
+        room_q = room_q.where(models.Message.correlation_id.is_(None))
+    budget = LEAN_TRANSCRIPT_CHARS if lean else MAX_TRANSCRIPT_CHARS
     if run_id is not None:
         room_q = room_q.where(
             (models.Message.correlation_id.is_(None)) | (models.Message.correlation_id != run_id)
@@ -69,7 +76,7 @@ async def build_request(
     total = 0
     for msg, sender in (await session.execute(room_q)).all():
         line = line_for(msg, sender, MAX_MESSAGE_CHARS)
-        if total + len(line) > MAX_TRANSCRIPT_CHARS:
+        if total + len(line) > budget:
             break
         entries.append((msg.seq, line))
         total += len(line)

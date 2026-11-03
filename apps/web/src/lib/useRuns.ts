@@ -6,7 +6,7 @@ import { useNewMessages } from "./useNewMessages";
 import { isRunActive, type Message, type Run } from "./types";
 
 export interface UseRunsOptions {
-  client?: Pick<Api, "listRuns" | "getRun" | "cancelRun">;
+  client?: Pick<Api, "listRuns" | "getRun" | "cancelRun"> & Partial<Pick<Api, "wrapUpRun">>;
   /** Poll interval while any run is queued or running. */
   pollMs?: number;
   limit?: number;
@@ -115,5 +115,13 @@ export function useRuns(
     return run;
   }, []);
 
-  return { runs, loaded, error, reload, addRun, cancel };
+  const wrapUp = useCallback(async (runId: string) => {
+    const fn = clientRef.current.wrapUpRun;
+    if (!fn) throw new Error("Wrap up is not available.");
+    const run = await fn(runId);
+    setRuns((prev) => upsertRun(prev, run));
+    return run;
+  }, []);
+
+  return { runs, loaded, error, reload, addRun, cancel, wrapUp };
 }

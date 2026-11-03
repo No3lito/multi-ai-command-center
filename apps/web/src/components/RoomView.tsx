@@ -321,6 +321,7 @@ export function RoomView(props: Props) {
               error={runs.error}
               agentName={agentName}
               onCancel={runs.cancel}
+              onWrapUp={runs.wrapUp}
               onRetry={runs.reload}
             />
           </div>

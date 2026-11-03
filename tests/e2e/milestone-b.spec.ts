@@ -259,6 +259,18 @@ test("connect Grok Bot from the dashboard; a review run waits for it", async ({ 
   await runItem.getByTestId("run-cancel").click();
   await expect(runItem).toHaveAttribute("data-status", "cancelled", { timeout: 10_000 });
 
+  // A second review is wrapped up instead: it stops waiting and concludes with a brief.
+  await openGoal(page);
+  await page.getByTestId("collab-workflow").selectOption("review");
+  await page.getByTestId("collab-builder").selectOption({ label: "Grok Bot E2E (connected)" });
+  await page.getByTestId("collab-goal").fill("Review and conclude");
+  await page.getByTestId("collab-start").click();
+  const second = page.getByTestId("run-item").filter({ hasText: "Review and conclude" }).first();
+  await expect(second).toHaveAttribute("data-status", "waiting", { timeout: 20_000 });
+  await second.getByTestId("run-wrap-up").click();
+  await expect(second).toHaveAttribute("data-status", "completed", { timeout: 30_000 });
+  await expect(second.getByTestId("verdict")).toHaveText("Needs you");
+
   await tab(page, "setup");
   const item = panel.getByTestId("connection-item").filter({ hasText: "Grok Bot E2E" });
   await item.getByText("Disconnect").click();

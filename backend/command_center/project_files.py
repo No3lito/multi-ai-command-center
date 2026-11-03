@@ -35,7 +35,10 @@ def context_paths(ws: Workspace, project: Project) -> list[str]:
     """Always read: the project card, its family page and the owner's standing rules."""
     paths = [f"{project.path}/PROJECT.md"]
     family_page = f"{PROJECTS_DIR}/{project.family}/{project.family.upper()}.md"
-    for extra in (family_page, "02-REFERENCE/owner-rules.md"):
+    # A project card can name more files every run must read: "always_read: a.md, sources/x.md"
+    # (paths relative to the project), for example a facts sheet about the project's code.
+    extras = [f"{project.path}/{p.strip().strip('/')}" for p in project.always_read]
+    for extra in (family_page, "02-REFERENCE/owner-rules.md", *extras):
         try:
             if ws.real_path(extra).is_file():
                 paths.append(extra)

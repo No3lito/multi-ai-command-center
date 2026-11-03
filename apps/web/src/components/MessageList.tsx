@@ -5,6 +5,7 @@ import { formatCount, formatUsd } from "@/lib/format";
 import { foldRuns } from "@/lib/foldRuns";
 import { isRunActive, type Message, type PrincipalKind, type Run } from "@/lib/types";
 import type { PendingMessage } from "@/lib/useOutbox";
+import { VerdictPill } from "./VerdictPill";
 
 const NEAR_BOTTOM_PX = 120;
 
@@ -246,8 +247,9 @@ function RunFold({
               ` · ${run.kind === "collab" ? "plan & review" : run.kind === "build" ? "design & build" : "review & improve"}`}
             {run && ` · ${formatUsd(run.spent_usd)}`}
           </p>
-          <p className="truncate font-medium" title={title}>
-            {title}
+          <p className="flex items-center gap-1.5 font-medium" title={title}>
+            {run?.verdict && <VerdictPill verdict={run.verdict} />}
+            <span className="truncate">{title}</span>
           </p>
           {line && (
             <p data-testid="run-fold-line" className="mt-0.5 text-sm text-fg">

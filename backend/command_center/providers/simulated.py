@@ -32,6 +32,7 @@ class SimulatedAdapter:
         if "```decisions" in task:
             # A decision brief: one clearly labelled example, so decision cards can be tried
             # without paying for a model. Approving it starts nothing.
+            text = "**Verdict:** Needs you. [Simulated] One example decision is waiting.\n" + text
             text += (
                 "\n**Waiting on you:**\n- [Simulated] Example decision: approve this to try the buttons.\n"
                 '```decisions\n[{"question": '

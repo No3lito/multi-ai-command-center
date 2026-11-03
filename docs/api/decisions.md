@@ -2,6 +2,21 @@
 
 The owner answers decisions on the dashboard with one click. Approving starts the work the agents already prepared, so there is no copying of goals between screens and no nudging of agents.
 
+## Conclude, don't loop
+
+- **Verdict:** every brief starts with `**Verdict:** Done | Blocked | Needs you` and the answer in one sentence. It's stored as `Run.verdict` (`done`, `blocked` or `needs_you`) and shown as a pill on runs, folded run cards, the latest conclusion and History.
+- **What reaches the owner:** "Waiting on you" may only hold decisions that spend money beyond the run, touch anything live or irreversible, or change direction. Agents decide everything else and list it under Decided. They never ask the owner who should do work.
+- **Who can do work:** the brief's author gets the real list of who can act in the room and what each can and cannot do (`describe_executors`). Claude and GPT write text only. Grok Bot uses its own tools. Changing the Command Center's code needs a coding agent, which never appears in the room.
+- **No silent fallbacks:** if a follow-up's worker isn't in the room, or a limit is reached, nothing starts. The answer is still recorded, and the reason is returned as `DecisionAnswerOut.no_run_reason` and posted in the room ("Nothing was started: …"). Pending cards show it ahead of time as `cannot_run_reason`.
+- **Round limit:** follow-ups form a chain (`Run.chain_root_id`, `Run.chain_depth`). There are at most `MAX_ROUNDS` = 2 follow-up rounds. The last round is told to give a final recommendation, its decisions can't start more runs, and cards from it show **Final round**.
+- **Chain budget:**
+  - A chain shares `CHAIN_BUDGET` = $2.00. A follow-up's budget is the smallest of: the requested budget (or the default), any dollar cap in the owner's note ("under $1.00", "max $0.50"; `note_cap`), and what's left of the chain budget.
+  - Under $0.10 left: nothing starts.
+- **Lean follow-ups:** a follow-up carries only `previous-run/<id>.md` (the previous brief plus its final message) and any files its plan names, not every file the previous run had.
+- **Lean context:** steps of plan, build and review runs read their own run's messages plus the owner's last 10 chat messages outside runs (`lean=True`). Reply runs still see the room.
+- **Owner's notes:** every sentence is a requirement ("finalize" means conclude now).
+- **Wrap it up:** `POST /api/runs/{id}/wrap-up` (owner, active plan, build or review runs) sets `wrap_up`. The engine skips the remaining steps, including a wait for Grok Bot, and the lead writes a concluding brief.
+
 ## How a decision is raised
 
 - The decision brief (see [`files-and-briefs.md`](files-and-briefs.md)) ends with a fenced ` ```decisions ` block: a JSON array with one object per "Waiting on you" item.

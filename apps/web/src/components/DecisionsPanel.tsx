@@ -4,6 +4,7 @@ import { useState } from "react";
 import { isApiError } from "@/lib/api";
 import type { Decision, DecisionAnswer, DecisionAnswerBody, FollowUpPlan, Run } from "@/lib/types";
 import { PanelSection } from "./PanelSection";
+import { VerdictPill } from "./VerdictPill";
 
 interface Props {
   runs: Run[];
@@ -92,7 +93,18 @@ function DecisionCard({
   const btn = "rounded-md px-2 py-1 text-[11px] font-medium disabled:opacity-50";
   return (
     <li data-testid="decision-card" className="rounded-md border border-line bg-bg p-2 text-xs">
-      <p className="font-medium text-fg">{decision.question}</p>
+      <p className="font-medium text-fg">
+        {decision.final_round && (
+          <span
+            data-testid="decision-final-round"
+            className="mr-1 rounded bg-warn-soft px-1 text-[10px] font-semibold text-warn"
+            title="This topic reached its follow-up limit: this is the final recommendation"
+          >
+            Final round
+          </span>
+        )}
+        {decision.question}
+      </p>
       {decision.why && (
         <p className="mt-1 text-fg" data-testid="decision-why">
           <span className="font-semibold">Why it matters: </span>
@@ -108,9 +120,15 @@ function DecisionCard({
       <p className="mt-0.5 text-[11px] text-muted" data-testid="decision-cost">
         Cost: {decision.cost || "unknown"}
       </p>
-      <p className="mt-0.5 text-[11px] text-muted" data-testid="decision-plan">
-        If approved: {describePlan(decision.on_approve)}
-      </p>
+      {decision.cannot_run_reason ? (
+        <p className="mt-0.5 text-[11px] text-warn" data-testid="decision-cannot-run">
+          If approved: nothing starts. {decision.cannot_run_reason} Your answer is still recorded.
+        </p>
+      ) : (
+        <p className="mt-0.5 text-[11px] text-muted" data-testid="decision-plan">
+          If approved: {describePlan(decision.on_approve)}
+        </p>
+      )}
       {showNote ? (
         <div className="mt-1.5 space-y-1">
           <textarea
@@ -219,7 +237,10 @@ export function DecisionsPanel({ runs, decisions = [], onAnswer }: Props) {
       {latest && (
         <div className="mb-2 rounded-md border border-accent bg-accent-soft p-2 text-xs" data-testid="decision-latest">
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-accent">Latest conclusion</p>
-          <p className="font-medium text-fg">{bottomLine(latest.brief ?? "")}</p>
+          <p className="flex items-start gap-1.5 font-medium text-fg">
+            <VerdictPill verdict={latest.verdict} />
+            <span>{bottomLine(latest.brief ?? "")}</span>
+          </p>
           <p className="mt-0.5 truncate text-[10px] text-muted" title={latest.goal}>
             {latest.goal.split("\n")[0]}
           </p>
