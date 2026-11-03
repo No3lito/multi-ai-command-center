@@ -38,6 +38,13 @@ export function describePlan(plan: FollowUpPlan): string {
   return "Claude and GPT work it out and report back.";
 }
 
+const FOLLOW_LABEL: Record<DecisionAnswer, string> = {
+  approve: "Approve",
+  more_info: "Need more info",
+  decline: "Decline",
+  dismiss: "Dismiss",
+};
+
 const STATUS_LABEL: Record<Decision["status"], string> = {
   pending: "Pending",
   approved: "Approved",
@@ -53,8 +60,10 @@ function DecisionCard({
   decision: Decision;
   onAnswer?: (decisionId: string, body: DecisionAnswerBody) => Promise<unknown>;
 }) {
-  const [showNote, setShowNote] = useState(false);
-  const [note, setNote] = useState("");
+  // The agents' suggested note is filled in; the owner can edit it or clear it.
+  const [showNote, setShowNote] = useState(!!decision.suggested_note);
+  const [note, setNote] = useState(decision.suggested_note ?? "");
+  const follow = decision.recommended ?? null;
   const [budget, setBudget] = useState("");
   const [busy, setBusy] = useState<DecisionAnswer | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +93,12 @@ function DecisionCard({
   return (
     <li data-testid="decision-card" className="rounded-md border border-line bg-bg p-2 text-xs">
       <p className="font-medium text-fg">{decision.question}</p>
+      {decision.why && (
+        <p className="mt-1 text-fg" data-testid="decision-why">
+          <span className="font-semibold">Why it matters: </span>
+          {decision.why}
+        </p>
+      )}
       {decision.recommendation && (
         <p className="mt-1 text-fg" data-testid="decision-recommendation">
           <span className="font-semibold text-accent">Recommended: </span>
@@ -101,9 +116,10 @@ function DecisionCard({
           <textarea
             data-testid="decision-note"
             className="w-full rounded border border-line bg-bg p-1 text-xs"
-            rows={2}
+            rows={4}
             maxLength={2000}
             placeholder="Optional note or limit, e.g. cap at 50k Helius credits"
+            aria-label="Note for the agents"
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
@@ -130,11 +146,24 @@ function DecisionCard({
           Add a note or budget
         </button>
       )}
+      {follow && (
+        <button
+          type="button"
+          data-testid="decision-follow"
+          className={`${btn} mt-2 w-full bg-accent py-1.5 text-white`}
+          disabled={!!busy || !onAnswer || (follow !== "decline" && budgetBad)}
+          onClick={() => void send(follow)}
+          title={note.trim() ? "Sends the note above with your answer" : undefined}
+        >
+          {busy === follow ? "Saving…" : `Do what they recommend: ${FOLLOW_LABEL[follow]}`}
+          {note.trim() ? " (with the note)" : ""}
+        </button>
+      )}
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <button
           type="button"
           data-testid="decision-approve"
-          className={`${btn} bg-accent text-white`}
+          className={`${btn} ${follow ? "border border-line" : "bg-accent text-white"}`}
           disabled={!!busy || !onAnswer || budgetBad}
           onClick={() => void send("approve")}
         >
@@ -174,10 +203,9 @@ function DecisionCard({
   );
 }
 
-/** Conclusions of finished runs in this room, and the decisions waiting on the owner. */
+/** The latest conclusion and the decisions waiting on the owner. Past briefs live in History. */
 export function DecisionsPanel({ runs, decisions = [], onAnswer }: Props) {
   const withBriefs = runs.filter((r) => r.brief);
-  const [open, setOpen] = useState<string | null>(null);
   const latest = withBriefs[0];
   if (!latest && decisions.length === 0) return null;
   const pending = decisions.filter((d) => d.status === "pending");
@@ -239,38 +267,13 @@ export function DecisionsPanel({ runs, decisions = [], onAnswer }: Props) {
                 <span className="text-fg">{d.question}</span>
                 {d.owner_note && <span className="block text-[10px] text-muted">Note: {d.owner_note}</span>}
                 {d.follow_up_run_id && (
-                  <span className="block text-[10px] text-muted">Follow-up run started; see Runs below.</span>
+                  <span className="block text-[10px] text-muted">Follow-up run started; see the Runs tab.</span>
                 )}
               </li>
             ))}
           </ul>
         </div>
       )}
-      <ul className="space-y-1.5">
-        {withBriefs.slice(0, 10).map((r) => {
-          const expanded = open === r.id;
-          return (
-            <li key={r.id} data-testid="decision-brief" className="rounded-md border border-line bg-bg px-2 py-1.5">
-              <button
-                type="button"
-                className="w-full text-left text-xs"
-                aria-expanded={expanded}
-                onClick={() => setOpen(expanded ? null : r.id)}
-              >
-                <span className="font-medium">{bottomLine(r.brief ?? "")}</span>
-                <span className="block truncate text-[10px] text-muted">
-                  {new Date(r.finished_at ?? r.updated_at).toLocaleString()} · {r.goal.split("\n")[0]}
-                </span>
-              </button>
-              {expanded && (
-                <div data-testid="decision-brief-full" className="mt-1 whitespace-pre-wrap text-xs text-fg">
-                  {r.brief}
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
     </PanelSection>
   );
 }

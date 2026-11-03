@@ -31,6 +31,7 @@ from command_center.protocol import (
     FileEntryOut,
     FilesOut,
     FollowUpPlanOut,
+    HistoryOut,
     MemberIn,
     PriceOut,
     RoomDetailOut,
@@ -142,6 +143,7 @@ def run_out(r: models.Run, attachments: list[AttachmentOut] | None = None) -> Ru
         write_brief=r.write_brief if r.write_brief is not None else True,
         brief=r.brief,
         pending_decisions=r.pending_decisions,
+        archived_at=r.archived_at,
         id=r.id,
         room_id=r.room_id,
         kind=r.kind,
@@ -186,6 +188,9 @@ def decision_out(d: models.Decision, run_goal: str) -> DecisionOut:
         run_goal=run_goal.split("\n")[0][:300],
         question=d.question,
         recommendation=d.recommendation,
+        recommended=d.recommended,
+        why=d.why,
+        suggested_note=d.suggested_note,
         cost=d.cost,
         on_approve=_plan(follow.get("on_approve")),
         on_more_info=_plan(more),
@@ -646,6 +651,90 @@ def register(
         return DecisionAnswerOut(
             decision=decision_out(decision, source_goal),
             follow_up_run=run_out(follow_up, run_attachments) if follow_up is not None else None,
+        )
+
+    # ------------------------------------------------------------ archive and history
+
+    async def set_archived(
+        run_id: str, archived: bool, request: Request, principal: models.Principal, session: AsyncSession
+    ) -> RunOut:
+        require_owner(principal)
+        run = await own_run(session, run_id, principal)
+        if run.status in ("queued", "running", "waiting"):
+            raise api_error(409, "run_active", "Finish or cancel the run before archiving it")
+        run.archived_at = func.now() if archived else None
+        await session.commit()
+        await session.refresh(run)
+        await audit(session, "run.archive" if archived else "run.unarchive", principal.id, run.id, request)
+        return run_out(run, (await attachments_for(session, [run.id])).get(run.id))
+
+    @app.post("/api/runs/{run_id}/archive", response_model=RunOut)
+    async def archive_run(
+        run_id: str, request: Request, principal: PrincipalDep, session: SessionDep
+    ) -> RunOut:
+        """Hide a finished run from the chat and the run list. Nothing is deleted."""
+        return await set_archived(run_id, True, request, principal, session)
+
+    @app.post("/api/runs/{run_id}/unarchive", response_model=RunOut)
+    async def unarchive_run(
+        run_id: str, request: Request, principal: PrincipalDep, session: SessionDep
+    ) -> RunOut:
+        return await set_archived(run_id, False, request, principal, session)
+
+    @app.get("/api/rooms/{room_id}/history", response_model=HistoryOut)
+    async def room_history(
+        room_id: str,
+        principal: PrincipalDep,
+        session: SessionDep,
+        q: Annotated[str, Query(max_length=200)] = "",
+        archived: Annotated[str, Query(pattern="^(include|only|exclude)$")] = "include",
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ) -> HistoryOut:
+        """Finished runs and decisions in a room, newest first, optionally matching every word of q."""
+        await member_room(session, room_id, principal)
+        words = [w for w in q.split() if w][:8]
+
+        def like(w: str) -> str:
+            return "%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+        run_stmt = select(models.Run).where(
+            models.Run.room_id == room_id,
+            models.Run.status.in_(("completed", "failed", "cancelled")),
+            models.Run.kind.in_(("collab", "build", "review")),
+        )
+        if archived == "only":
+            run_stmt = run_stmt.where(models.Run.archived_at.is_not(None))
+        elif archived == "exclude":
+            run_stmt = run_stmt.where(models.Run.archived_at.is_(None))
+        for w in words:
+            pat = like(w)
+            run_stmt = run_stmt.where(
+                models.Run.goal.ilike(pat, escape="\\")
+                | func.coalesce(models.Run.brief, "").ilike(pat, escape="\\")
+            )
+        runs = list(
+            (await session.scalars(run_stmt.order_by(models.Run.created_at.desc()).limit(limit))).all()
+        )
+
+        dec_stmt = (
+            select(models.Decision, models.Run.goal)
+            .join(models.Run, models.Run.id == models.Decision.run_id)
+            .where(models.Decision.room_id == room_id)
+        )
+        for w in words:
+            pat = like(w)
+            dec_stmt = dec_stmt.where(
+                models.Decision.question.ilike(pat, escape="\\")
+                | func.coalesce(models.Decision.owner_note, "").ilike(pat, escape="\\")
+                | func.coalesce(models.Decision.why, "").ilike(pat, escape="\\")
+            )
+        decs = (
+            await session.execute(dec_stmt.order_by(models.Decision.created_at.desc()).limit(limit))
+        ).all()
+        atts = await attachments_for(session, [r.id for r in runs])
+        return HistoryOut(
+            runs=[run_out(r, atts.get(r.id)) for r in runs],
+            decisions=[decision_out(d, goal) for d, goal in decs],
         )
 
     # ------------------------------------------------------------ connections (external agents)

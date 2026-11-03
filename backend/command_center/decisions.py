@@ -45,12 +45,34 @@ class OnMoreInfo(BaseModel):
     goal: str = Field(default="", max_length=4000)
 
 
+Answer = Literal["approve", "decline", "more_info"]
+
+
+def infer_answer(recommendation: str | None) -> Answer | None:
+    """The answer a free-text recommendation starts with ("Approve: ...", "More info, ...")."""
+    head = (recommendation or "").strip().lower()[:40]
+    if re.match(r"^(more info|need more info|more information|get more info)", head):
+        return "more_info"
+    if re.match(r"^(approve|yes|ratify)", head):
+        return "approve"
+    if re.match(r"^(decline|no\b|reject|hold|do not|don't)", head):
+        return "decline"
+    return None
+
+
 class DecisionDraft(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     recommendation: str | None = Field(default=None, max_length=2000)
+    recommended: Answer | None = None
+    why: str | None = Field(default=None, max_length=2000)
+    suggested_note: str | None = Field(default=None, max_length=2000)
     cost: str | None = Field(default=None, max_length=500)
     on_approve: OnApprove = Field(default_factory=OnApprove)
     on_more_info: OnMoreInfo = Field(default_factory=OnMoreInfo)
+
+    def model_post_init(self, _context: Any) -> None:
+        if self.recommended is None:
+            self.recommended = infer_answer(self.recommendation)
 
 
 def split_brief(text: str) -> tuple[str, list[DecisionDraft]]:
@@ -81,8 +103,12 @@ def instruction_suffix(participants: list[str], attachments: list[str]) -> str:
     return (
         "\n\nAfter the brief, add one fenced code block that starts with ```decisions and contains a "
         "JSON array with one object per 'Waiting on you' item (an empty array if there are none). "
-        'Each object has: "question" (what the owner decides, one sentence), "recommendation" '
-        '(approve, decline or more info, and why, one sentence), "cost" (what it would cost if '
+        'Each object has: "question" (what the owner decides, one sentence), "why" (two or three '
+        "plain-language sentences a busy owner who has not read the run can follow: the background "
+        'and what is at stake, no jargon), "recommended" ("approve", "decline" or "more_info"), '
+        '"recommendation" (that answer and the reason, one sentence), "suggested_note" (the note '
+        "the owner should attach if they follow the recommendation: conditions, caps and what must "
+        'be checked first, written as an instruction to the agents), "cost" (what it would cost if '
         'known, else "unknown"), "on_approve" (what runs if the owner approves: {"workflow": '
         '"review" | "build" | "collab" | "none", "worker": name or null, "goal": the full '
         'goal for that run, "attachments": file paths}), and "on_more_info" (what runs to get '
@@ -109,6 +135,9 @@ async def store(session: AsyncSession, run: models.Run, drafts: list[DecisionDra
             position=i,
             question=d.question,
             recommendation=d.recommendation,
+            recommended=d.recommended,
+            why=d.why,
+            suggested_note=d.suggested_note,
             cost=d.cost,
             follow_up={"on_approve": d.on_approve.model_dump(), "on_more_info": d.on_more_info.model_dump()},
             status="pending",

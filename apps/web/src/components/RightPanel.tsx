@@ -11,11 +11,13 @@ interface Props {
   status: SocketStatus;
   lastSeq: number;
   hasRoom: boolean;
-  /** Milestone B panels (agents, collaborate, runs, usage), rendered above members. */
+  /** Tabs and panels, rendered above members. */
   children?: ReactNode;
+  /** Show the members and connection sections (the Setup tab). */
+  showDetails?: boolean;
 }
 
-export function RightPanel({ open, detail, status, lastSeq, hasRoom, children }: Props) {
+export function RightPanel({ open, detail, status, lastSeq, hasRoom, children, showDetails = true }: Props) {
   return (
     <aside
       id="right-sidebar"
@@ -30,33 +32,37 @@ export function RightPanel({ open, detail, status, lastSeq, hasRoom, children }:
 
       {children}
 
-      <Section title="Members" count={detail?.members.length}>
-        {!hasRoom || !detail ? (
-          <p className="text-muted">{hasRoom ? "Loading..." : "No room selected."}</p>
-        ) : (
-          <ul className="space-y-1">
-            {detail.members.map((m) => (
-              <li key={m.id} className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate">{m.display_name}</span>
-                <KindBadge kind={m.kind} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+      {showDetails && (
+        <>
+          <Section title="Members" count={detail?.members.length}>
+            {!hasRoom || !detail ? (
+              <p className="text-muted">{hasRoom ? "Loading..." : "No room selected."}</p>
+            ) : (
+              <ul className="space-y-1">
+                {detail.members.map((m) => (
+                  <li key={m.id} className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate">{m.display_name}</span>
+                    <KindBadge kind={m.kind} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
 
-      <Section title="Connection">
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-xs">
-          <dt className="text-muted">status</dt>
-          <dd>{hasRoom ? connectionLabel(status) : "n/a"}</dd>
-          <dt className="text-muted">last seq</dt>
-          <dd>{hasRoom ? lastSeq : "n/a"}</dd>
-          <dt className="text-muted">room</dt>
-          <dd className="truncate" title={detail?.id}>
-            {detail?.id ?? "n/a"}
-          </dd>
-        </dl>
-      </Section>
+          <Section title="Connection">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-xs">
+              <dt className="text-muted">status</dt>
+              <dd>{hasRoom ? connectionLabel(status) : "n/a"}</dd>
+              <dt className="text-muted">last seq</dt>
+              <dd>{hasRoom ? lastSeq : "n/a"}</dd>
+              <dt className="text-muted">room</dt>
+              <dd className="truncate" title={detail?.id}>
+                {detail?.id ?? "n/a"}
+              </dd>
+            </dl>
+          </Section>
+        </>
+      )}
     </aside>
   );
 }
