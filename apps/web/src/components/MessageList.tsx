@@ -5,7 +5,7 @@ import { formatCount, formatUsd } from "@/lib/format";
 import { foldRuns } from "@/lib/foldRuns";
 import { isRunActive, type Message, type PrincipalKind, type Run } from "@/lib/types";
 import type { PendingMessage } from "@/lib/useOutbox";
-import { senderStyle, tint } from "@/lib/senderStyle";
+import { senderStyle } from "@/lib/senderStyle";
 import { Avatar } from "./Avatar";
 import { bottomLine } from "./DecisionsPanel";
 import { Folded, Markdown } from "./Markdown";
@@ -22,8 +22,8 @@ const KIND_LABEL: Record<PrincipalKind, string> = {
 };
 
 const KIND_STYLE: Record<PrincipalKind, string> = {
-  owner: "bg-accent-soft text-accent",
-  human: "bg-accent-soft text-accent",
+  owner: "bg-accent-soft text-accent-ink",
+  human: "bg-accent-soft text-accent-ink",
   agent: "bg-ok-soft text-ok",
   external: "bg-warn-soft text-warn",
   system: "bg-panel-2 text-muted",
@@ -138,7 +138,7 @@ export function MessageList({ messages, pending, loading, onRetry, onDiscard, ru
           </div>
         )}
 
-        <ol className="space-y-0.5">
+        <ol>
           {items.map((item) =>
             item.type === "message" ? (
               <MessageRow key={item.message.id} message={item.message} />
@@ -335,18 +335,20 @@ function ChatRow({ message }: { message: Message }) {
       data-simulated={simulated || undefined}
       data-correlation-id={message.correlation_id ?? undefined}
       data-reply-to={message.reply_to ?? undefined}
-      className={`group my-2 flex gap-2 ${mine ? "flex-row-reverse" : ""}`}
+      className={`group my-1.5 flex gap-2 ${mine ? "flex-row-reverse" : ""}`}
     >
       <Avatar style={style} label={message.sender.display_name} />
       <div
-        className={`min-w-0 rounded-lg px-3 py-2 ${mine ? "max-w-[85%]" : "max-w-full flex-1"}`}
-        style={{
-          background: tint(style.color, mine ? 0.16 : 0.09),
-          borderLeft: mine ? undefined : `3px solid ${simulated ? "var(--color-warn, #E3B341)" : style.color}`,
-        }}
+        className={`min-w-0 rounded-lg px-3 py-2 ${mine ? "max-w-[85%] bg-panel-2" : "max-w-[72ch] flex-1"}`}
       >
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="font-semibold" style={{ color: style.color }}>
+          <span className="inline-flex items-center gap-2 font-semibold text-fg">
+            <span
+              aria-hidden="true"
+              data-testid="agent-dot"
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ background: style.color }}
+            />
             {message.sender.display_name}
           </span>
           <KindBadge kind={message.sender.kind} />
